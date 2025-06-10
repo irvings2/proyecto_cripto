@@ -11,7 +11,7 @@ from io import BytesIO
 from fastapi.responses import FileResponse
 import os
 
-DATABASE_URL = "postgresql://postgres:nedtu3-ruqvec-mixSew@db.gijqjegotyhtdbngcuth.supabase.co:5432/postgres"
+DATABASE_URL = "postgresql://postgres.gijqjegotyhtdbngcuth:nedtu3-ruqvec-mixSew@aws-0-us-east-2.pooler.supabase.com:6543/postgres"
 
 # Crear la base y el motor de SQLAlchemy
 engine = create_engine(DATABASE_URL, pool_size=10, max_overflow=20)
