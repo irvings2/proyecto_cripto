@@ -1,7 +1,7 @@
 from fastapi import FastAPI, Depends, HTTPException, File, UploadFile
-from sqlalchemy import create_engine, Column, Integer, String, Boolean
+from sqlalchemy import create_engine, Column, Integer, String, Boolean, ForeignKey
 from sqlalchemy.ext.declarative import declarative_base
-from sqlalchemy.orm import sessionmaker, Session
+from sqlalchemy.orm import sessionmaker, Session, relationship
 from sqlalchemy import select
 from pydantic import BaseModel
 from passlib.context import CryptContext
@@ -28,6 +28,36 @@ class Usuario(Base):
     tipo_usuario = Column(String, index=False)
     llavesgeneradas = Column(Boolean, default=False)
     public_key = Column(String, nullable=True)
+    
+    medico = relationship("Medico", back_populates="usuario", uselist=False)
+    paciente = relationship("Paciente", back_populates="usuario", uselist=False)
+    farmaceutico = relationship("Farmaceutico", back_populates="usuario", uselist=False)
+    
+class Medico(Base):
+    __tablename__ = 'medico'
+
+    id = Column(Integer, primary_key=True, index=True)
+    usuario_id = Column(Integer, ForeignKey('usuarios.id'))  # Relación con la tabla usuarios
+    nombre = Column(String)
+    apellido_paterno = Column(String)
+    apellido_materno = Column(String)
+    especialidad = Column(String)
+    telefono = Column(String)
+
+    usuario = relationship("Usuario", back_populates="medico")
+    clinica = relationship("Clinica", back_populates="medico")
+    
+class Clinica(Base):
+    __tablename__ = 'clinica'
+
+    id = Column(Integer, primary_key=True, index=True)
+    nombre = Column(String)
+    tipo = Column(String)
+
+    # Relación de una clínica con sus pacientes y médicos
+    medicos = relationship("Medico", back_populates="clinica")
+    pacientes = relationship("Paciente", back_populates="clinica")
+
 
 app = FastAPI()
 
@@ -47,6 +77,14 @@ class UsuarioCreate(BaseModel):
 
     class Config:
         orm_mode = True
+        
+class MedicoCreate(UsuarioCreate):
+    nombre: str
+    apellido_paterno: str
+    apellido_materno: str
+    especialidad: str
+    telefono: str
+    clinica_id: int  # Relación con la clínica
 
 # Configuración de passlib para el hash de la contraseña
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
@@ -71,10 +109,35 @@ async def create_usuario(usuario: UsuarioCreate, db: Session = Depends(get_db)):
 
     # Crear una nueva instancia de Usuario y agregarla a la base de datos
     hashed_password = hash_password(usuario.password)  # Generar el hash de la contraseña
-    new_user = Usuario(username=usuario.username, password_hash=hashed_password, tipo_usuario=usuario.tipo_usuario)
+    new_user = Usuario(
+        username=usuario.username,
+        password_hash=hashed_password,
+        tipo_usuario=usuario.tipo_usuario
+    )
+    
     db.add(new_user)
-    db.commit()  # Guardar los cambios
-    db.refresh(new_user)  # Refrescar la instancia para obtener el id generado
+    db.commit()  # Guardar el usuario en la tabla de usuarios
+    db.refresh(new_user)  # Obtener el id generado
+
+    # Verificar si la clínica existe
+    clinica = db.query(Clinica).filter(Clinica.id == usuario.clinica_id).first()
+    if not clinica:
+        raise HTTPException(status_code=400, detail="La clínica no existe.")
+
+    # Dependiendo del tipo de usuario, crear la entrada en la tabla correspondiente
+    if usuario.tipo_usuario == 'medico':
+        medico = Medico(
+            usuario_id=new_user.id,
+            nombre=usuario.nombre,
+            apellidos=usuario.apellidos,
+            especialidad='Medicina General',  # Recibido desde el frontend
+            cedula='123456',  # Recibido desde el frontend
+            clinica_id=usuario.clinica_id  # Asignar clínica al médico
+        )
+        db.add(medico)
+        db.commit()
+        
+    db.refresh(new_user)  # Refrescar la instancia para obtener el id generado en la tabla de usuarios
 
     return {"id": new_user.id, "username": new_user.username, "tipo_usuario": new_user.tipo_usuario}
 
