@@ -1,4 +1,5 @@
 from fastapi import FastAPI, Depends, HTTPException, File, UploadFile
+from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import create_engine, Column, Integer, String, Boolean, ForeignKey
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker, Session, relationship
@@ -31,7 +32,7 @@ class Usuario(Base):
     public_key = Column(String, nullable=True)
     
     medico = relationship("Medico", back_populates="usuario", uselist=False)
-    #paciente = relationship("Paciente", back_populates="usuario", uselist=False)
+    paciente = relationship("Paciente", back_populates="usuario", uselist=False)
     #farmaceutico = relationship("Farmaceutico", back_populates="usuario", uselist=False)
     
 class Medico(Base):
@@ -49,6 +50,20 @@ class Medico(Base):
     usuario = relationship("Usuario", back_populates="medico")
     clinica = relationship("Clinica", back_populates="medico")
     
+class Paciente(Base):
+    __tablename__ = 'paciente'
+
+    id = Column(Integer, primary_key=True, index=True)
+    usuario_id = Column(Integer, ForeignKey('usuario.id'))  # Relación con la tabla usuarios
+    nombre = Column(String)
+    apellido_paterno = Column(String)
+    apellido_materno = Column(String)
+    telefono = Column(String)
+    clinica_id = Column(Integer, ForeignKey('clinica.id'))
+
+    usuario = relationship("Usuario", back_populates="paciente")
+    clinica = relationship("Clinica", back_populates="paciente")
+    
 class Clinica(Base):
     __tablename__ = 'clinica'
 
@@ -58,10 +73,18 @@ class Clinica(Base):
 
     # Relación de una clínica con sus pacientes y médicos
     medico = relationship("Medico", back_populates="clinica")
-    #paciente = relationship("Paciente", back_populates="clinica")
+    paciente = relationship("Paciente", back_populates="clinica")
 
 
 app = FastAPI()
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],  # Permite todas las solicitudes de cualquier origen
+    allow_credentials=True,
+    allow_methods=["*"],  # Permite todos los métodos (GET, POST, etc.)
+    allow_headers=["*"],  # Permite todos los encabezados
+)
 
 # Dependencia para obtener la sesión de base de datos
 def get_db():
@@ -88,6 +111,20 @@ class MedicoCreate(UsuarioCreate):
     especialidad: str
     telefono: str
     clinica_id: int  # Relación con la clínica
+    
+class PacienteCreate(UsuarioCreate):
+    nombre: str
+    apellido_paterno: str
+    apellido_materno: str
+    telefono: str
+    clinica_id: int  # Relación con la clínica
+    
+class FarmaceuticoCreate(UsuarioCreate):
+    nombre: str
+    apellido_paterno: str
+    apellido_materno: str
+    telefono: str
+    farmacia_id: int  # Relación con la clínica
 
 # Configuración de passlib para el hash de la contraseña
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
@@ -104,7 +141,7 @@ async def get_usuarios(db: Session = Depends(get_db)):
     return {"usuarios": result}
 
 @app.post("/usuarios/")
-async def create_usuario(usuario: Union[MedicoCreate], db: Session = Depends(get_db)):
+async def create_usuario(usuario: Union[MedicoCreate, PacienteCreate], db: Session = Depends(get_db)):
     # Verificar si el username ya existe
     existing_user = db.query(Usuario).filter(Usuario.username == usuario.username).first()
     if existing_user:
@@ -145,6 +182,22 @@ async def create_usuario(usuario: Union[MedicoCreate], db: Session = Depends(get
         return {"id": new_user.id, "username": new_user.username, "tipo_usuario": new_user.tipo_usuario, 
                 "nombre": medico.nombre, "apellido_paterno": medico.apellido_paterno, "especialidad": medico.especialidad, 
                 "clinica": clinica.nombre}
+        
+    if usuario.tipo_usuario == 'paciente':
+        paciente = Paciente(
+            usuario_id=new_user.id,
+            nombre=usuario.nombre,
+            apellido_paterno=usuario.apellido_paterno,
+            apellido_materno=usuario.apellido_materno,
+            telefono=usuario.telefono,
+            clinica_id=usuario.clinica_id  # Asignar clínica al médico
+        )
+        db.add(paciente)
+        db.commit()
+
+        # Devolvemos la respuesta con los datos del médico
+        return {"id": new_user.id, "username": new_user.username, "tipo_usuario": new_user.tipo_usuario, 
+                "nombre": paciente.nombre, "apellido_paterno": paciente.apellido_paterno, "clinica": clinica.nombre}
     
     # Si el tipo de usuario no es reconocido
     raise HTTPException(status_code=400, detail="Tipo de usuario no válido.")
