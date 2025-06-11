@@ -1,6 +1,6 @@
 from fastapi import FastAPI, Depends, HTTPException, File, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
-from sqlalchemy import create_engine, Column, Integer, String, Boolean, ForeignKey
+from sqlalchemy import create_engine, Column, Integer, String, Boolean, ForeignKey, Text, TIMESTAMP
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker, Session, relationship
 from sqlalchemy import select
@@ -10,7 +10,8 @@ from cryptography.hazmat.primitives.asymmetric import ed25519
 from cryptography.hazmat.primitives import serialization
 from io import BytesIO
 from fastapi.responses import FileResponse
-from typing import Union
+from typing import Union, Optional
+from datetime import datetime
 import os
 
 DATABASE_URL = "postgresql://postgres.gijqjegotyhtdbngcuth:nedtu3-ruqvec-mixSew@aws-0-us-east-2.pooler.supabase.com:6543/postgres"
@@ -49,6 +50,7 @@ class Medico(Base):
 
     usuario = relationship("Usuario", back_populates="medico")
     clinica = relationship("Clinica", back_populates="medico")
+    receta = relationship("Receta", back_populates="medico")
     
 class Paciente(Base):
     __tablename__ = 'paciente'
@@ -63,6 +65,7 @@ class Paciente(Base):
 
     usuario = relationship("Usuario", back_populates="paciente")
     clinica = relationship("Clinica", back_populates="paciente")
+    receta = relationship("Receta", back_populates="paciente")
     
 class Clinica(Base):
     __tablename__ = 'clinica'
@@ -75,6 +78,25 @@ class Clinica(Base):
     medico = relationship("Medico", back_populates="clinica")
     paciente = relationship("Paciente", back_populates="clinica")
 
+class Receta(Base):
+    __tablename__ = 'receta'
+
+    id = Column(Integer, primary_key=True, index=True)
+    paciente_id = Column(Integer, ForeignKey('paciente.id'), nullable=False)
+    medico_id = Column(Integer, ForeignKey('medico.id'), nullable=False)
+    farmaceutico_id = Column(Integer, ForeignKey('farmaceutico.id'), nullable=True)
+    fecha_emision = Column(TIMESTAMP, default=datetime.utcnow, nullable=False)
+    fecha_vencimiento = Column(TIMESTAMP, nullable=False)
+    estado = Column(String(50), nullable=False, default='emitida')
+    firma_digital_medico = Column(Text, nullable=False)
+    fecha_surtido = Column(TIMESTAMP, nullable=True)
+    observaciones = Column(Text, nullable=True)
+    receta = Column(Text, nullable=True)
+
+    # Relaciones con otras tablas
+    paciente = relationship("Paciente", back_populates="receta")
+    medico = relationship("Medico", back_populates="receta")
+    #farmaceutico = relationship("Farmaceutico", back_populates="receta")
 
 app = FastAPI()
 
@@ -125,6 +147,17 @@ class FarmaceuticoCreate(UsuarioCreate):
     apellido_materno: str
     telefono: str
     farmacia_id: int  # Relación con la clínica
+
+class RecetaCreate(BaseModel):
+    paciente_id: int
+    medico_id: int
+    farmaceutico_id: Optional[int] = None  # Puede ser nulo
+    fecha_vencimiento: datetime
+    estado: str = "emitida"  # Valor por defecto
+    mensaje: str  # El mensaje que será firmado
+
+    class Config:
+        orm_mode = True
 
 # Configuración de passlib para el hash de la contraseña
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
@@ -241,35 +274,63 @@ async def login(username: str, password: str, db: Session = Depends(get_db)):
     # Devolver el archivo de la clave privada para ser descargado
     return FileResponse(path=private_key_file_path, filename=private_key_file_path, media_type='application/pem')
 
-@app.post("/firmar_mensaje/")
-async def firmar_mensaje(username: str, mensaje: str, private_key_file: UploadFile = File(...), db: Session = Depends(get_db)):
-    # Buscar el usuario en la base de datos
-    user = db.query(Usuario).filter(Usuario.username == username).first()
+@app.post("/firmar_receta/")
+async def firmar_mensaje(
+    receta: RecetaCreate,  # Recibimos el modelo Pydantic
+    db: Session = Depends(get_db)
+):
+    # Verificar si el paciente existe
+    paciente = db.query(Paciente).filter(Paciente.id == receta.paciente_id).first()
+    if not paciente:
+        raise HTTPException(status_code=404, detail="Paciente no encontrado")
+
+    # Verificar si el médico existe
+    medico = db.query(Medico).filter(Medico.id == receta.medico_id).first()
+    if not medico:
+        raise HTTPException(status_code=404, detail="Médico no encontrado")
     
-    if not user:
-        raise HTTPException(status_code=404, detail="Usuario no encontrado")
-    
-    # Verificar si las llaves están generadas
-    if not user.llavesgeneradas:
-        raise HTTPException(status_code=400, detail="Las llaves no han sido generadas para este usuario")
-    
-    # Cargar la clave privada desde el archivo PEM proporcionado por el usuario
-    private_key_pem = await private_key_file.read()
+    # Asegurarse de que el usuario que firma es un médico y que las llaves están generadas
+    if not medico.usuario.llavesgeneradas:
+        raise HTTPException(status_code=400, detail="Las llaves no han sido generadas para este médico")
+
+    # Cargar la clave privada del médico
+    private_key_pem = medico.usuario.public_key.encode()  # Suponiendo que la clave pública es almacenada como texto
     try:
         private_key = serialization.load_pem_private_key(private_key_pem, password=None)
     except Exception as e:
-        raise HTTPException(status_code=400, detail="No se pudo cargar la clave privada")
+        raise HTTPException(status_code=400, detail="No se pudo cargar la clave privada del médico")
 
     # Firmar el mensaje usando la clave privada
     try:
-        signature = private_key.sign(mensaje.encode())  # Firmar el mensaje con la clave privada
+        signature = private_key.sign(receta.mensaje.encode())  # Firmar el mensaje con la clave privada
     except Exception as e:
         raise HTTPException(status_code=400, detail="Error al firmar el mensaje")
-    
-    # Retornar la firma
+
+    # Crear la receta con los datos proporcionados
+    nueva_receta = Receta(
+        paciente_id=receta.paciente_id,
+        medico_id=receta.medico_id,
+        farmaceutico_id=receta.farmaceutico_id,
+        fecha_emision=datetime.utcnow(),  # Fecha actual de emisión
+        fecha_vencimiento=receta.fecha_vencimiento,
+        estado=receta.estado,
+        firma_digital_medico=signature.hex(),  # Guardamos la firma digital como hex
+    )
+
+    # Agregar la receta a la base de datos
+    db.add(nueva_receta)
+    db.commit()
+    db.refresh(nueva_receta)
+
+    # Retornar la firma y la receta con los datos básicos
     return {
-        "message": "Mensaje firmado con éxito.",
-        "firma": signature.hex()  # Devolver la firma como un string hexadecimal
+        "message": "Receta firmada con éxito.",
+        "firma_digital": signature.hex(),  # Devolver la firma digital como un string hexadecimal
+        "receta_id": nueva_receta.id,
+        "medico": medico.nombre,
+        "paciente": paciente.nombre,
+        "estado": nueva_receta.estado,
+        "fecha_vencimiento": nueva_receta.fecha_vencimiento
     }
 
 # Función para generar las llaves ED25519
