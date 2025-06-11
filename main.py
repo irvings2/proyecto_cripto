@@ -34,7 +34,7 @@ class Usuario(Base):
     
     medico = relationship("Medico", back_populates="usuario", uselist=False)
     paciente = relationship("Paciente", back_populates="usuario", uselist=False)
-    #farmaceutico = relationship("Farmaceutico", back_populates="usuario", uselist=False)
+    farmaceutico = relationship("Farmaceutico", back_populates="usuario", uselist=False)
     
 class Medico(Base):
     __tablename__ = 'medico'
@@ -77,10 +77,7 @@ class Farmaceutico(Base):
     apellido_materno = Column(String, nullable=True)
     telefono = Column(String)
 
-    # Relación con la tabla Usuario
     usuario = relationship("Usuario", back_populates="farmaceutico")
-
-    # Relación con la tabla Receta
     receta = relationship("Receta", back_populates="farmaceutico")
     
 class Clinica(Base):
