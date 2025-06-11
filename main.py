@@ -276,7 +276,8 @@ async def login(username: str, password: str, db: Session = Depends(get_db)):
 
 @app.post("/firmar_receta/")
 async def firmar_mensaje(
-    receta: RecetaCreate,  # Recibimos el modelo Pydantic
+    receta: RecetaCreate,  # Recibimos los datos de la receta
+    private_key_file: UploadFile = File(...),  # Recibimos la clave privada como archivo
     db: Session = Depends(get_db)
 ):
     # Verificar si el paciente existe
@@ -293,8 +294,8 @@ async def firmar_mensaje(
     if not medico.usuario.llavesgeneradas:
         raise HTTPException(status_code=400, detail="Las llaves no han sido generadas para este médico")
 
-    # Cargar la clave privada del médico
-    private_key_pem = medico.usuario.public_key.encode()  # Suponiendo que la clave pública es almacenada como texto
+    # Leer la clave privada desde el archivo .pem
+    private_key_pem = await private_key_file.read()
     try:
         private_key = serialization.load_pem_private_key(private_key_pem, password=None)
     except Exception as e:
