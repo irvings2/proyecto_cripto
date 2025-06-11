@@ -215,7 +215,7 @@ async def login(username: str, password: str, db: Session = Depends(get_db)):
     
     # Verificar si las llaves ya fueron generadas
     if user.llavesgeneradas:
-        return {"message": "Inicio de sesión exitoso. Las llaves ya han sido generadas."}
+        return {"username": user.username, "tipo_usuario": user.tipo_usuario}
     
     # Si no han sido generadas, creamos las llaves
     private_key, public_key = generate_ed25519_keys()
