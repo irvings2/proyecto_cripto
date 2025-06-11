@@ -67,6 +67,22 @@ class Paciente(Base):
     clinica = relationship("Clinica", back_populates="paciente")
     receta = relationship("Receta", back_populates="paciente")
     
+class Farmaceutico(Base):
+    __tablename__ = 'farmaceutico'
+
+    id = Column(Integer, primary_key=True, index=True)
+    usuario_id = Column(Integer, ForeignKey('usuario.id'))  # Relación con la tabla de usuarios
+    nombre = Column(String)
+    apellido_paterno = Column(String)
+    apellido_materno = Column(String, nullable=True)
+    telefono = Column(String)
+
+    # Relación con la tabla Usuario
+    usuario = relationship("Usuario", back_populates="farmaceutico")
+
+    # Relación con la tabla Receta
+    receta = relationship("Receta", back_populates="farmaceutico")
+    
 class Clinica(Base):
     __tablename__ = 'clinica'
 
@@ -96,7 +112,7 @@ class Receta(Base):
     # Relaciones con otras tablas
     paciente = relationship("Paciente", back_populates="receta")
     medico = relationship("Medico", back_populates="receta")
-    #farmaceutico = relationship("Farmaceutico", back_populates="receta")
+    farmaceutico = relationship("Farmaceutico", back_populates="receta")
 
 app = FastAPI()
 
