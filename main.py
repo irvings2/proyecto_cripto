@@ -9,6 +9,7 @@ from cryptography.hazmat.primitives.asymmetric import ed25519
 from cryptography.hazmat.primitives import serialization
 from io import BytesIO
 from fastapi.responses import FileResponse
+from typing import Union
 import os
 
 DATABASE_URL = "postgresql://postgres.gijqjegotyhtdbngcuth:nedtu3-ruqvec-mixSew@aws-0-us-east-2.pooler.supabase.com:6543/postgres"
@@ -30,19 +31,20 @@ class Usuario(Base):
     public_key = Column(String, nullable=True)
     
     medico = relationship("Medico", back_populates="usuario", uselist=False)
-    paciente = relationship("Paciente", back_populates="usuario", uselist=False)
-    farmaceutico = relationship("Farmaceutico", back_populates="usuario", uselist=False)
+    #paciente = relationship("Paciente", back_populates="usuario", uselist=False)
+    #farmaceutico = relationship("Farmaceutico", back_populates="usuario", uselist=False)
     
 class Medico(Base):
     __tablename__ = 'medico'
 
     id = Column(Integer, primary_key=True, index=True)
-    usuario_id = Column(Integer, ForeignKey('usuarios.id'))  # Relación con la tabla usuarios
+    usuario_id = Column(Integer, ForeignKey('usuario.id'))  # Relación con la tabla usuarios
     nombre = Column(String)
     apellido_paterno = Column(String)
     apellido_materno = Column(String)
     especialidad = Column(String)
     telefono = Column(String)
+    clinica_id = Column(Integer, ForeignKey('clinica.id'))
 
     usuario = relationship("Usuario", back_populates="medico")
     clinica = relationship("Clinica", back_populates="medico")
@@ -55,8 +57,8 @@ class Clinica(Base):
     tipo = Column(String)
 
     # Relación de una clínica con sus pacientes y médicos
-    medicos = relationship("Medico", back_populates="clinica")
-    pacientes = relationship("Paciente", back_populates="clinica")
+    medico = relationship("Medico", back_populates="clinica")
+    #paciente = relationship("Paciente", back_populates="clinica")
 
 
 app = FastAPI()
@@ -74,6 +76,7 @@ class UsuarioCreate(BaseModel):
     username: str
     password: str
     tipo_usuario: str
+    clinica_id: int
 
     class Config:
         orm_mode = True
@@ -101,7 +104,7 @@ async def get_usuarios(db: Session = Depends(get_db)):
     return {"usuarios": result}
 
 @app.post("/usuarios/")
-async def create_usuario(usuario: UsuarioCreate, db: Session = Depends(get_db)):
+async def create_usuario(usuario: Union[MedicoCreate], db: Session = Depends(get_db)):
     # Verificar si el username ya existe
     existing_user = db.query(Usuario).filter(Usuario.username == usuario.username).first()
     if existing_user:
@@ -114,7 +117,7 @@ async def create_usuario(usuario: UsuarioCreate, db: Session = Depends(get_db)):
         password_hash=hashed_password,
         tipo_usuario=usuario.tipo_usuario
     )
-    
+
     db.add(new_user)
     db.commit()  # Guardar el usuario en la tabla de usuarios
     db.refresh(new_user)  # Obtener el id generado
@@ -129,17 +132,22 @@ async def create_usuario(usuario: UsuarioCreate, db: Session = Depends(get_db)):
         medico = Medico(
             usuario_id=new_user.id,
             nombre=usuario.nombre,
-            apellidos=usuario.apellidos,
-            especialidad='Medicina General',  # Recibido desde el frontend
-            cedula='123456',  # Recibido desde el frontend
+            apellido_paterno=usuario.apellido_paterno,
+            apellido_materno=usuario.apellido_materno,
+            especialidad=usuario.especialidad,  # Recibido desde el frontend
+            telefono=usuario.telefono,
             clinica_id=usuario.clinica_id  # Asignar clínica al médico
         )
         db.add(medico)
         db.commit()
-        
-    db.refresh(new_user)  # Refrescar la instancia para obtener el id generado en la tabla de usuarios
 
-    return {"id": new_user.id, "username": new_user.username, "tipo_usuario": new_user.tipo_usuario}
+        # Devolvemos la respuesta con los datos del médico
+        return {"id": new_user.id, "username": new_user.username, "tipo_usuario": new_user.tipo_usuario, 
+                "nombre": medico.nombre, "apellido_paterno": medico.apellido_paterno, "especialidad": medico.especialidad, 
+                "clinica": clinica.nombre}
+    
+    # Si el tipo de usuario no es reconocido
+    raise HTTPException(status_code=400, detail="Tipo de usuario no válido.")
 
 @app.post("/login/")
 async def login(username: str, password: str, db: Session = Depends(get_db)):
