@@ -148,17 +148,6 @@ class FarmaceuticoCreate(UsuarioCreate):
     telefono: str
     farmacia_id: int  # Relación con la clínica
 
-class RecetaCreate(BaseModel):
-    paciente_id: int
-    medico_id: int
-    farmaceutico_id: Optional[int] = None  # Puede ser nulo
-    fecha_vencimiento: datetime
-    estado: str = "emitida"  # Valor por defecto
-    mensaje: str  # El mensaje que será firmado
-
-    class Config:
-        orm_mode = True
-
 # Configuración de passlib para el hash de la contraseña
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
@@ -276,17 +265,22 @@ async def login(username: str, password: str, db: Session = Depends(get_db)):
 
 @app.post("/firmar_receta/")
 async def firmar_mensaje(
-    receta: RecetaCreate,  # Recibimos los datos de la receta
+    paciente_id: int = Form(...),  # Recibimos los parámetros como Form (ya que multipart/form-data los manda así)
+    medico_id: int = Form(...),
+    farmaceutico_id: Optional[int] = Form(None),
+    fecha_vencimiento: str = Form(...),  # La fecha de vencimiento
+    estado: str = Form("emitida"),  # Estado con valor por defecto
+    mensaje: str = Form(...),  # El mensaje a firmar
     private_key_file: UploadFile = File(...),  # Recibimos la clave privada como archivo
     db: Session = Depends(get_db)
 ):
     # Verificar si el paciente existe
-    paciente = db.query(Paciente).filter(Paciente.id == receta.paciente_id).first()
+    paciente = db.query(Paciente).filter(Paciente.id == paciente_id).first()
     if not paciente:
         raise HTTPException(status_code=404, detail="Paciente no encontrado")
 
     # Verificar si el médico existe
-    medico = db.query(Medico).filter(Medico.id == receta.medico_id).first()
+    medico = db.query(Medico).filter(Medico.id == medico_id).first()
     if not medico:
         raise HTTPException(status_code=404, detail="Médico no encontrado")
     
@@ -303,18 +297,18 @@ async def firmar_mensaje(
 
     # Firmar el mensaje usando la clave privada
     try:
-        signature = private_key.sign(receta.mensaje.encode())  # Firmar el mensaje con la clave privada
+        signature = private_key.sign(mensaje.encode())  # Firmar el mensaje con la clave privada
     except Exception as e:
         raise HTTPException(status_code=400, detail="Error al firmar el mensaje")
 
     # Crear la receta con los datos proporcionados
     nueva_receta = Receta(
-        paciente_id=receta.paciente_id,
-        medico_id=receta.medico_id,
-        farmaceutico_id=receta.farmaceutico_id,
+        paciente_id=paciente_id,
+        medico_id=medico_id,
+        farmaceutico_id=farmaceutico_id,
         fecha_emision=datetime.utcnow(),  # Fecha actual de emisión
-        fecha_vencimiento=receta.fecha_vencimiento,
-        estado=receta.estado,
+        fecha_vencimiento=datetime.fromisoformat(fecha_vencimiento),  # Convertir a datetime
+        estado=estado,
         firma_digital_medico=signature.hex(),  # Guardamos la firma digital como hex
     )
 
