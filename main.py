@@ -7,6 +7,7 @@ from sqlalchemy import select
 from pydantic import BaseModel
 from passlib.context import CryptContext
 from cryptography.hazmat.primitives.asymmetric import ed25519
+from cryptography.hazmat.primitives.asymmetric.x25519 import X25519PrivateKey
 from cryptography.hazmat.primitives import serialization
 from io import BytesIO
 from fastapi.responses import FileResponse
@@ -30,7 +31,8 @@ class Usuario(Base):
     password_hash = Column(String, index=False)
     tipo_usuario = Column(String, index=False)
     llavesgeneradas = Column(Boolean, default=False)
-    public_key = Column(String, nullable=True)
+    public_key_ed = Column(String, nullable=True)
+    public_key_x255 = Column(String, nullable=True)
     
     medico = relationship("Medico", back_populates="usuario", uselist=False)
     paciente = relationship("Paciente", back_populates="usuario", uselist=False)
@@ -253,15 +255,15 @@ async def login(username: str, password: str, db: Session = Depends(get_db)):
         return {"username": user.username, "tipo_usuario": user.tipo_usuario}
     
     # Si no han sido generadas, creamos las llaves
-    private_key, public_key = generate_ed25519_keys()
+    private_key_ed, public_key_ed = generate_ed25519_keys()
     
     # Guardar la clave pública en la base de datos
-    user.public_key = public_key
+    user.public_key_ed = public_key_ed
     user.llavesgeneradas = True
     db.commit()
 
     # Guardar la clave privada como un archivo .pem para ser descargado
-    private_key_pem = private_key.private_bytes(
+    private_key_pem = private_key_ed.private_bytes(
         encoding=serialization.Encoding.PEM,
         format=serialization.PrivateFormat.PKCS8,
         encryption_algorithm=serialization.NoEncryption()
@@ -339,6 +341,32 @@ async def firmar_mensaje(
         "paciente": paciente.nombre,
         "estado": nueva_receta.estado,
         "fecha_vencimiento": nueva_receta.fecha_vencimiento
+    }
+    
+@app.get("/generate_x25519_keys")
+async def generate_x25519_keys():
+    # Generar la clave privada
+    private_key = X25519PrivateKey.generate()
+
+    # Obtener la clave pública
+    public_key = private_key.public_key()
+
+    # Serializar las llaves a formato PEM para que puedan ser enviadas
+    private_pem = private_key.private_bytes(
+        encoding=serialization.Encoding.PEM,
+        format=serialization.PrivateFormat.TraditionalOpenSSL,
+        encryption_algorithm=serialization.NoEncryption()
+    )
+
+    public_pem = public_key.public_bytes(
+        encoding=serialization.Encoding.PEM,
+        format=serialization.PublicFormat.SubjectPublicKeyInfo
+    )
+
+    # Retornar las claves en formato PEM
+    return {
+        "private_key": private_pem.decode("utf-8"),
+        "public_key": public_pem.decode("utf-8")
     }
 
 # Función para generar las llaves ED25519
