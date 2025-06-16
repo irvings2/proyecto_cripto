@@ -354,7 +354,7 @@ async def generate_x25519_keys():
     # Serializar las llaves a formato PEM para que puedan ser enviadas
     private_pem = private_key.private_bytes(
         encoding=serialization.Encoding.PEM,
-        format=serialization.PrivateFormat.TraditionalOpenSSL,
+        format=serialization.PrivateFormat.PKCS8,  # Cambiado a PKCS8
         encryption_algorithm=serialization.NoEncryption()
     )
 
