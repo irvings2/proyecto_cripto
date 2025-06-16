@@ -103,8 +103,6 @@ class Farmacia(Base):
     direccion = Column(String)
     telefono = Column(String)
 
-    farmaceutico = relationship("Farmaceutico", back_populates="farmacia")
-
 class Receta(Base):
     __tablename__ = 'receta'
 
