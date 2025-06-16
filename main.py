@@ -260,7 +260,6 @@ async def create_usuario(usuario: Union[MedicoCreate, PacienteCreate, Farmaceuti
             nombre=usuario.nombre,
             apellido_paterno=usuario.apellido_paterno,
             apellido_materno=usuario.apellido_materno,
-            direccion=usuario.direccion,
             telefono=usuario.telefono,
             farmacia_id=usuario.farmacia_id
         )
