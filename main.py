@@ -172,6 +172,7 @@ class FarmaceuticoCreate(UsuarioCreate):
     apellido_paterno: str
     apellido_materno: str
     telefono: str
+    direccion: str
     farmacia_id: int  # Relación con la clínica
 
 # Configuración de passlib para el hash de la contraseña
@@ -207,10 +208,15 @@ async def create_usuario(usuario: Union[MedicoCreate, PacienteCreate, Farmaceuti
     db.commit()  # Guardar el usuario en la tabla de usuarios
     db.refresh(new_user)  # Obtener el id generado
 
-    # Verificar si la clínica existe
-    clinica = db.query(Clinica).filter(Clinica.id == usuario.clinica_id).first()
-    if not clinica:
-        raise HTTPException(status_code=400, detail="La clínica no existe.")
+    if usuario.tipo_usuario in ['medico', 'paciente']:
+        clinica = db.query(Clinica).filter(Clinica.id == usuario.clinica_id).first()
+        if not clinica:
+            raise HTTPException(status_code=400, detail="La clínica no existe.")
+    
+    if usuario.tipo_usuario == 'farmaceutico':
+        farmacia = db.query(Farmacia).filter(Farmacia.id == usuario.farmacia_id).first()
+        if not farmacia:
+            raise HTTPException(status_code=400, detail="La farmacia no existe.")
 
     # Dependiendo del tipo de usuario, crear la entrada en la tabla correspondiente
     if usuario.tipo_usuario == 'medico':
@@ -253,8 +259,9 @@ async def create_usuario(usuario: Union[MedicoCreate, PacienteCreate, Farmaceuti
             nombre=usuario.nombre,
             apellido_paterno=usuario.apellido_paterno,
             apellido_materno=usuario.apellido_materno,
+            direccion=usuario.direccion,
             telefono=usuario.telefono,
-            clinica_id=usuario.clinica_id  # Asignar clínica al médico
+            farmacia_id=usuario.farmacia_id
         )
         db.add(farmaceutico)
         db.commit()
