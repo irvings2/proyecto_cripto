@@ -383,11 +383,7 @@ def generate_x25519_keys():
         format=serialization.PublicFormat.SubjectPublicKeyInfo
     )
 
-    # Retornar las claves en formato PEM
-    return {
-        "private_key": private_pem.decode("utf-8"),
-        "public_key": public_pem.decode("utf-8")
-    }
+    return private_key, public_pem.decode("utf-8")
 
 # Función para generar las llaves ED25519
 def generate_ed25519_keys():
