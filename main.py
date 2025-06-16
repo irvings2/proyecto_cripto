@@ -173,7 +173,6 @@ class FarmaceuticoCreate(UsuarioCreate):
     apellido_paterno: str
     apellido_materno: str
     telefono: str
-    direccion: str
     farmacia_id: int  # Relación con la clínica
     clinica_id: Optional[int] = None
 
