@@ -1,0 +1,71 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Descargar Archivos</title>
+</head>
+<body>
+    <button id="downloadBtn">Descargar Archivos</button>
+
+    <script>
+        document.getElementById("downloadBtn").addEventListener("click", async function() {
+            const url = new URL("https://proyecto-cripto.onrender.com/login/"); // Reemplaza con tu URL de API
+            const params = {
+                username: "GUSI020426HDFRNRA4",  // Usuario que deseas enviar
+                password: "12345678"  // Contraseña correspondiente
+            };
+
+            // Agregar parámetros a la URL
+            Object.keys(params).forEach(key => url.searchParams.append(key, params[key]));
+
+            try {
+                const response = await fetch(url, {
+                    method: "POST",
+                    headers: {
+                        "Content-Type": "application/json"  // Si es necesario
+                    }
+                });
+
+                if (response.ok) {
+                    const result = await response.json();
+
+                    // Verifica si el servidor devolvió los archivos
+                    if (result.private_key_ed_file && result.private_key_x255_file) {
+                        // Descarga la primera clave (ED25519)
+                        downloadFile(result.private_key_ed_file, "private_key_ed.pem");
+
+                        // Descarga la segunda clave (X25519)
+                        downloadFile(result.private_key_x255_file, "private_key_x255.pem");
+                    } else {
+                        alert("No se generaron las claves.");
+                    }
+                } else {
+                    alert("Error en la solicitud: " + response.statusText);
+                }
+            } catch (error) {
+                alert("Error en la conexión: " + error.message);
+            }
+        });
+
+        // Función para descargar el archivo
+        function downloadFile(fileUrl, fileName) {
+            fetch(fileUrl)
+                .then(response => response.blob())
+                .then(blob => {
+                    const url = window.URL.createObjectURL(blob);
+                    const a = document.createElement("a");
+                    a.style.display = "none";
+                    a.href = url;
+                    a.download = fileName;
+                    document.body.appendChild(a);
+                    a.click();
+                    window.URL.revokeObjectURL(url);
+                })
+                .catch(error => {
+                    console.error("Error al descargar el archivo: ", error);
+                });
+        }
+    </script>
+</body>
+</html>

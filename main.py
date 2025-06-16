@@ -13,6 +13,7 @@ from io import BytesIO
 from fastapi.responses import FileResponse
 from typing import Union, Optional
 from datetime import datetime
+from tempfile import NamedTemporaryFile
 import os
 
 DATABASE_URL = "postgresql://postgres.gijqjegotyhtdbngcuth:nedtu3-ruqvec-mixSew@aws-0-us-east-2.pooler.supabase.com:6543/postgres"
@@ -20,6 +21,14 @@ DATABASE_URL = "postgresql://postgres.gijqjegotyhtdbngcuth:nedtu3-ruqvec-mixSew@
 # Crear la base y el motor de SQLAlchemy
 engine = create_engine(DATABASE_URL, pool_size=10, max_overflow=20)
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+
+# Ruta temporal para guardar los archivos
+TEMP_DIR = "temp"
+
+# Crear directorio si no existe
+if not os.path.exists(TEMP_DIR):
+    os.makedirs(TEMP_DIR)
+
 
 # Declarative Base para las tablas
 Base = declarative_base()
@@ -276,31 +285,25 @@ async def create_usuario(usuario: Union[MedicoCreate, PacienteCreate, Farmaceuti
 @app.post("/login/")
 async def login(username: str, password: str, db: Session = Depends(get_db)):
     user = db.query(Usuario).filter(Usuario.username == username).first()
-    
+
     if not user:
         raise HTTPException(status_code=404, detail="Usuario no encontrado")
     
-    # Verificar contraseña
     if not pwd_context.verify(password, user.password_hash):
         raise HTTPException(status_code=401, detail="Contraseña incorrecta")
-    
-    # Verificar si las llaves ya fueron generadas
+
     if user.llavesgeneradas:
         return {"username": user.username, "tipo_usuario": user.tipo_usuario}
     
-    # Si no han sido generadas, creamos las llaves
     private_key_ed, public_key_ed = generate_ed25519_keys()
+    private_key_x255, public_key_x255 = generate_x25519_keys()
     
-    # Generar las llaves X25519
-    private_key_x255, public_key_x255 = generate_x25519_keys()  # Llamamos a la función que ya tienes implementada
-    
-    # Guardar la clave pública de ED25519 y X25519 en la base de datos
     user.public_key_ed = public_key_ed
     user.public_key_x255 = public_key_x255
     user.llavesgeneradas = True
     db.commit()
 
-    # Guardar las claves privadas como archivos .pem para ser descargados
+    # Guardar las claves privadas en archivos temporales
     private_key_ed_pem = private_key_ed.private_bytes(
         encoding=serialization.Encoding.PEM,
         format=serialization.PrivateFormat.PKCS8,
@@ -312,19 +315,35 @@ async def login(username: str, password: str, db: Session = Depends(get_db)):
         format=serialization.PrivateFormat.PKCS8,
         encryption_algorithm=serialization.NoEncryption()
     )
-    
-    private_key_ed_file = BytesIO(private_key_ed_pem)
-    private_key_x255_file = BytesIO(private_key_x255_pem)
 
-    # Devolver los archivos de las claves privadas para ser descargados
+    # Guardar los archivos en el sistema de archivos temporal
+    ed_file_path = os.path.join(TEMP_DIR, f"private_key_ed_{username}.pem")
+    x255_file_path = os.path.join(TEMP_DIR, f"private_key_x255_{username}.pem")
+
+    with open(ed_file_path, "wb") as ed_file:
+        ed_file.write(private_key_ed_pem)
+
+    with open(x255_file_path, "wb") as x255_file:
+        x255_file.write(private_key_x255_pem)
+
+    # Devolver las URLs de los archivos generados
     return {
         "username": user.username,
         "tipo_usuario": user.tipo_usuario,
         "public_key_ed": public_key_ed,
         "public_key_x255": public_key_x255,
-        "private_key_ed_file": FileResponse(private_key_ed_file, filename=f"private_key_ed_{username}.pem", media_type="application/pem"),
-        "private_key_x255_file": FileResponse(private_key_x255_file, filename=f"private_key_x255_{username}.pem", media_type="application/pem")
+        "private_key_ed_file": {"url": f"/download/{os.path.basename(ed_file_path)}"},
+        "private_key_x255_file": {"url": f"/download/{os.path.basename(x255_file_path)}"}
     }
+
+@app.get("/download/{filename}")
+async def download_file(filename: str):
+    file_path = os.path.join(TEMP_DIR, filename)
+
+    if not os.path.exists(file_path):
+        raise HTTPException(status_code=404, detail="File not found")
+    
+    return FileResponse(file_path, media_type="application/pem", filename=filename)
 
 @app.post("/firmar_receta/")
 async def firmar_mensaje(
