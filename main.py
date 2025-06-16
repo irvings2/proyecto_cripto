@@ -81,6 +81,7 @@ class Farmaceutico(Base):
 
     usuario = relationship("Usuario", back_populates="farmaceutico")
     receta = relationship("Receta", back_populates="farmaceutico")
+    farmacia = relationship("Farmacia", back_populates="farmaceutico")
     
 class Clinica(Base):
     __tablename__ = 'clinica'
@@ -92,6 +93,16 @@ class Clinica(Base):
     # Relación de una clínica con sus pacientes y médicos
     medico = relationship("Medico", back_populates="clinica")
     paciente = relationship("Paciente", back_populates="clinica")
+    
+class Farmacia(Base):
+    __tablename__ = 'farmacia'
+
+    id = Column(Integer, primary_key=True, index=True)
+    nombre = Column(String)
+    direccion = Column(String)
+    telefono = Column(String)
+
+    farmaceutico = relationship("Farmaceutico", back_populates="farmacia")
 
 class Receta(Base):
     __tablename__ = 'receta'
@@ -178,7 +189,7 @@ async def get_usuarios(db: Session = Depends(get_db)):
     return {"usuarios": result}
 
 @app.post("/usuarios/")
-async def create_usuario(usuario: Union[MedicoCreate, PacienteCreate], db: Session = Depends(get_db)):
+async def create_usuario(usuario: Union[MedicoCreate, PacienteCreate, FarmaceuticoCreate], db: Session = Depends(get_db)):
     # Verificar si el username ya existe
     existing_user = db.query(Usuario).filter(Usuario.username == usuario.username).first()
     if existing_user:
@@ -235,6 +246,22 @@ async def create_usuario(usuario: Union[MedicoCreate, PacienteCreate], db: Sessi
         # Devolvemos la respuesta con los datos del médico
         return {"id": new_user.id, "username": new_user.username, "tipo_usuario": new_user.tipo_usuario, 
                 "nombre": paciente.nombre, "apellido_paterno": paciente.apellido_paterno, "clinica": clinica.nombre}
+        
+    if usuario.tipo_usuario == 'farmaceutico':
+        farmaceutico = Farmaceutico(
+            usuario_id=new_user.id,
+            nombre=usuario.nombre,
+            apellido_paterno=usuario.apellido_paterno,
+            apellido_materno=usuario.apellido_materno,
+            telefono=usuario.telefono,
+            clinica_id=usuario.clinica_id  # Asignar clínica al médico
+        )
+        db.add(farmaceutico)
+        db.commit()
+
+        # Devolvemos la respuesta con los datos del médico
+        return {"id": new_user.id, "username": new_user.username, "tipo_usuario": new_user.tipo_usuario, 
+                "nombre": farmaceutico.nombre, "apellido_paterno": farmaceutico.apellido_paterno, "farmacia": farmaceutico.farmacia}
     
     # Si el tipo de usuario no es reconocido
     raise HTTPException(status_code=400, detail="Tipo de usuario no válido.")
