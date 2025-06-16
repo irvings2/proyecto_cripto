@@ -124,10 +124,7 @@ class Receta(Base):
     fecha_emision = Column(TIMESTAMP, default=datetime.utcnow, nullable=False)
     fecha_vencimiento = Column(TIMESTAMP, nullable=False)
     estado = Column(String(50), nullable=False, default='emitida')
-    firma_digital_medico = Column(Text, nullable=False)
     fecha_surtido = Column(TIMESTAMP, nullable=True)
-    observaciones = Column(Text, nullable=True)
-    receta = Column(Text, nullable=True)
 
     # Relaciones con otras tablas
     paciente = relationship("Paciente", back_populates="receta")
@@ -399,7 +396,17 @@ async def firmar_mensaje(
     db.commit()
     db.refresh(nueva_receta)
 
-    # Retornar la firma y la receta con los datos básicos
+    # Guardar mensaje y firma en un archivo .txt
+    file_content = f"Mensaje: {mensaje}\n\nFirma Digital: {signature.hex()}"
+
+    # Guardar archivo en el directorio temporal
+    file_name = f"firma_{nueva_receta.id}.txt"
+    file_path = os.path.join(TEMP_DIR, file_name)
+
+    with open(file_path, "w") as file:
+        file.write(file_content)
+
+    # Retornar la respuesta con la URL para descargar el archivo generado
     return {
         "message": "Receta firmada con éxito.",
         "firma_digital": signature.hex(),  # Devolver la firma digital como un string hexadecimal
@@ -407,7 +414,8 @@ async def firmar_mensaje(
         "medico": medico.nombre,
         "paciente": paciente.nombre,
         "estado": nueva_receta.estado,
-        "fecha_vencimiento": nueva_receta.fecha_vencimiento
+        "fecha_vencimiento": nueva_receta.fecha_vencimiento,
+        "download_url": f"/download/{file_name}"  # URL del archivo generado
     }
     
 def generate_x25519_keys():
