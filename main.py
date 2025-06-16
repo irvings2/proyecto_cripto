@@ -78,6 +78,7 @@ class Farmaceutico(Base):
     apellido_paterno = Column(String)
     apellido_materno = Column(String, nullable=True)
     telefono = Column(String)
+    farmacia_id = Column(Integer, ForeignKey('farmacia.id'))
 
     usuario = relationship("Usuario", back_populates="farmaceutico")
     receta = relationship("Receta", back_populates="farmaceutico")
