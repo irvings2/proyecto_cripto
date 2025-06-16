@@ -173,6 +173,7 @@ class FarmaceuticoCreate(UsuarioCreate):
     telefono: str
     direccion: str
     farmacia_id: int  # Relación con la clínica
+    clinica_id: Optional[int] = None
 
 # Configuración de passlib para el hash de la contraseña
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
