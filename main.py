@@ -313,24 +313,17 @@ async def login(username: str, password: str, db: Session = Depends(get_db)):
         encryption_algorithm=serialization.NoEncryption()
     )
     
-    # Guardar los archivos de las claves privadas en el servidor para permitir la descarga
-    private_key_ed_file_path = f"private_key_ed_{username}.pem"
-    private_key_x255_file_path = f"private_key_x255_{username}.pem"
-    
-    with open(private_key_ed_file_path, "wb") as f:
-        f.write(private_key_ed_pem)
-    
-    with open(private_key_x255_file_path, "wb") as f:
-        f.write(private_key_x255_pem)
-    
+    private_key_ed_file = BytesIO(private_key_ed_pem)
+    private_key_x255_file = BytesIO(private_key_x255_pem)
+
     # Devolver los archivos de las claves privadas para ser descargados
     return {
         "username": user.username,
         "tipo_usuario": user.tipo_usuario,
         "public_key_ed": public_key_ed,
         "public_key_x255": public_key_x255,
-        "private_key_ed_file": FileResponse(path=private_key_ed_file_path, filename=private_key_ed_file_path, media_type='application/pem'),
-        "private_key_x255_file": FileResponse(path=private_key_x255_file_path, filename=private_key_x255_file_path, media_type='application/pem')
+        "private_key_ed_file": FileResponse(private_key_ed_file, filename=f"private_key_ed_{username}.pem", media_type="application/pem"),
+        "private_key_x255_file": FileResponse(private_key_x255_file, filename=f"private_key_x255_{username}.pem", media_type="application/pem")
     }
 
 @app.post("/firmar_receta/")
