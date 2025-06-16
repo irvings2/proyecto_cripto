@@ -384,7 +384,6 @@ async def firmar_mensaje(
     nueva_receta = Receta(
         paciente_id=paciente_id,
         medico_id=medico_id,
-        farmaceutico_id=farmaceutico_id,
         fecha_emision=datetime.utcnow(),  # Fecha actual de emisión
         fecha_vencimiento=datetime.fromisoformat(fecha_vencimiento),  # Convertir a datetime
         estado=estado,
