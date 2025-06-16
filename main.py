@@ -257,26 +257,47 @@ async def login(username: str, password: str, db: Session = Depends(get_db)):
     # Si no han sido generadas, creamos las llaves
     private_key_ed, public_key_ed = generate_ed25519_keys()
     
-    # Guardar la clave pública en la base de datos
+    # Generar las llaves X25519
+    private_key_x255, public_key_x255 = generate_x25519_keys()  # Llamamos a la función que ya tienes implementada
+    
+    # Guardar la clave pública de ED25519 y X25519 en la base de datos
     user.public_key_ed = public_key_ed
+    user.public_key_x255 = public_key_x255
     user.llavesgeneradas = True
     db.commit()
 
-    # Guardar la clave privada como un archivo .pem para ser descargado
-    private_key_pem = private_key_ed.private_bytes(
+    # Guardar las claves privadas como archivos .pem para ser descargados
+    private_key_ed_pem = private_key_ed.private_bytes(
         encoding=serialization.Encoding.PEM,
         format=serialization.PrivateFormat.PKCS8,
         encryption_algorithm=serialization.NoEncryption()
     )
     
-    private_key_file_path = f"private_key_{username}.pem"
+    private_key_x255_pem = private_key_x255.private_bytes(
+        encoding=serialization.Encoding.PEM,
+        format=serialization.PrivateFormat.PKCS8,
+        encryption_algorithm=serialization.NoEncryption()
+    )
     
-    # Guardar el archivo de la clave privada en el servidor para permitir la descarga
-    with open(private_key_file_path, "wb") as f:
-        f.write(private_key_pem)
+    # Guardar los archivos de las claves privadas en el servidor para permitir la descarga
+    private_key_ed_file_path = f"private_key_ed_{username}.pem"
+    private_key_x255_file_path = f"private_key_x255_{username}.pem"
     
-    # Devolver el archivo de la clave privada para ser descargado
-    return FileResponse(path=private_key_file_path, filename=private_key_file_path, media_type='application/pem')
+    with open(private_key_ed_file_path, "wb") as f:
+        f.write(private_key_ed_pem)
+    
+    with open(private_key_x255_file_path, "wb") as f:
+        f.write(private_key_x255_pem)
+    
+    # Devolver los archivos de las claves privadas para ser descargados
+    return {
+        "username": user.username,
+        "tipo_usuario": user.tipo_usuario,
+        "public_key_ed": public_key_ed,
+        "public_key_x255": public_key_x255,
+        "private_key_ed_file": FileResponse(path=private_key_ed_file_path, filename=private_key_ed_file_path, media_type='application/pem'),
+        "private_key_x255_file": FileResponse(path=private_key_x255_file_path, filename=private_key_x255_file_path, media_type='application/pem')
+    }
 
 @app.post("/firmar_receta/")
 async def firmar_mensaje(
@@ -343,8 +364,7 @@ async def firmar_mensaje(
         "fecha_vencimiento": nueva_receta.fecha_vencimiento
     }
     
-@app.get("/generate_x25519_keys")
-async def generate_x25519_keys():
+def generate_x25519_keys():
     # Generar la clave privada
     private_key = X25519PrivateKey.generate()
 
