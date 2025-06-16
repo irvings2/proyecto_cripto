@@ -388,7 +388,6 @@ async def firmar_mensaje(
         fecha_emision=datetime.utcnow(),  # Fecha actual de emisión
         fecha_vencimiento=datetime.fromisoformat(fecha_vencimiento),  # Convertir a datetime
         estado=estado,
-        firma_digital_medico=signature.hex(),  # Guardamos la firma digital como hex
     )
 
     # Agregar la receta a la base de datos
