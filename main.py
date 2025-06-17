@@ -6,6 +6,8 @@ from sqlalchemy.orm import sessionmaker, Session, relationship
 from sqlalchemy import select
 from pydantic import BaseModel
 from passlib.context import CryptContext
+from cryptography.hazmat.primitives import hashes
+from cryptography.hazmat.primitives.asymmetric import padding
 from cryptography.hazmat.primitives.asymmetric import ed25519
 from cryptography.hazmat.primitives.asymmetric.x25519 import X25519PrivateKey
 from cryptography.hazmat.primitives import serialization
@@ -416,7 +418,78 @@ async def firmar_mensaje(
         "download_url": f"/download/{file_name}"  # URL del archivo generado
     }
     
+@app.post("/verificar_firma/")
+async def verificar_firma(
+    archivo_firma: UploadFile = File(...),  # Recibimos el archivo que contiene el mensaje y la firma
+    db: Session = Depends(get_db)
+):
+    # Leer el archivo que contiene el idreceta, mensaje y la firma
+    file_content = await archivo_firma.read()
+
+    # Dividir el archivo en el idreceta, mensaje y firma (buscando las líneas correspondientes)
+    try:
+        file_content_str = file_content.decode('utf-8')
+        # Extraer el idreceta
+        idreceta_str = file_content_str.split("idreceta:")[1].split("\n")[0].strip()
+        # Extraer el mensaje
+        mensaje = file_content_str.split("Mensaje:")[1].split("Firma Digital:")[0].strip()
+        # Extraer la firma digital
+        firma_hex = file_content_str.split("Firma Digital:")[1].strip()
+
+        # Convertir receta_id de string a entero
+        try:
+            idreceta = int(idreceta_str)
+        except ValueError:
+            raise HTTPException(status_code=400, detail="Receta ID no válido")
+    except ValueError:
+        raise HTTPException(status_code=400, detail="El archivo no tiene el formato esperado")
+
+    # Convertir la firma de hexadecimal a bytes
+    try:
+        firma = bytes.fromhex(firma_hex)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Firma no válida")
+
+    # Obtener la receta desde la base de datos usando el idreceta
+    receta = db.query(Receta).filter(Receta.id == idreceta).first()
+    if not receta:
+        raise HTTPException(status_code=404, detail="Receta no encontrada")
+
+    # Obtener el medico_id de la receta
+    medico_id = receta.medico_id
+    if not medico_id:
+        raise HTTPException(status_code=404, detail="Médico no asociado a la receta")
+
+    # Obtener el médico desde la base de datos
+    medico = db.query(Medico).filter(Medico.id == medico_id).first()
+    if not medico:
+        raise HTTPException(status_code=404, detail="Médico no encontrado")
+
+    # Obtener la clave pública del médico desde la base de datos
+    public_key_pem = medico.usuario.public_key_ed
+    if not public_key_pem:
+        raise HTTPException(status_code=404, detail="Clave pública no encontrada para el médico")
+
+    try:
+        # Cargar la clave pública desde el formato PEM
+        public_key = serialization.load_pem_public_key(public_key_pem.encode('utf-8'))
+    except Exception as e:
+        raise HTTPException(status_code=400, detail="Error al cargar la clave pública")
+
+    # Verificar la firma usando la clave pública del médico
+    try:
+        public_key.verify(
+            firma,
+            mensaje.encode(),  # Convertimos el mensaje a bytes
+            padding.PKCS1v15(),
+            hashes.SHA256()
+        )
+        return {"message": "Firma verificada correctamente"}
+    except Exception as e:
+        raise HTTPException(status_code=400, detail="Firma no válida")
+    
 def generate_x25519_keys():
+    
     # Generar la clave privada
     private_key = X25519PrivateKey.generate()
 
