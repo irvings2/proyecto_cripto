@@ -6,8 +6,6 @@ from sqlalchemy.orm import sessionmaker, Session, relationship
 from sqlalchemy import select
 from pydantic import BaseModel
 from passlib.context import CryptContext
-from cryptography.hazmat.primitives import hashes
-from cryptography.hazmat.primitives.asymmetric import padding
 from cryptography.hazmat.primitives.asymmetric import ed25519
 from cryptography.hazmat.primitives.asymmetric.x25519 import X25519PrivateKey
 from cryptography.hazmat.primitives import serialization
@@ -436,10 +434,6 @@ async def verificar_firma(
         # Extraer la firma digital
         firma_hex = file_content_str.split("Firma Digital:")[1].strip()
 
-        print(f"Receta ID: {idreceta_str}")  # Debugging: Verificar idreceta
-        print(f"Mensaje: {mensaje}")  # Debugging: Verificar mensaje
-        print(f"Firma Hex: {firma_hex}")  # Debugging: Verificar firma
-
         # Convertir receta_id de string a entero
         try:
             idreceta = int(idreceta_str)
@@ -459,8 +453,6 @@ async def verificar_firma(
     if not receta:
         raise HTTPException(status_code=404, detail="Receta no encontrada")
 
-    print(f"Receta encontrada: {receta}")  # Debugging: Verificar si la receta existe
-
     # Obtener el medico_id de la receta
     medico_id = receta.medico_id
     if not medico_id:
@@ -470,8 +462,6 @@ async def verificar_firma(
     medico = db.query(Medico).filter(Medico.id == medico_id).first()
     if not medico:
         raise HTTPException(status_code=404, detail="Médico no encontrado")
-
-    print(f"Médico encontrado: {medico}")  # Debugging: Verificar si se encuentra el médico
 
     # Obtener la clave pública del médico desde la base de datos
     public_key_pem = medico.usuario.public_key_ed
@@ -484,17 +474,17 @@ async def verificar_firma(
     except Exception as e:
         raise HTTPException(status_code=400, detail="Error al cargar la clave pública")
 
-    # Verificar la firma usando la clave pública del médico
+    # Usar Ed25519PublicKey para verificar la firma
     try:
-        public_key.verify(
-            firma,
-            mensaje.encode(),  # Convertimos el mensaje a bytes
-            padding.PKCS1v15(),
-            hashes.SHA256()
-        )
+        # Convertir la clave pública a Ed25519PublicKey
+        ed_key = public_key if isinstance(public_key, ed25519.Ed25519PublicKey) else None
+        if not ed_key:
+            raise HTTPException(status_code=400, detail="Clave pública no es de tipo Ed25519")
+
+        # Verificar la firma usando Ed25519
+        ed_key.verify(firma, mensaje.encode())  # Verificar firma sin padding ni hash
         return {"message": "Firma verificada correctamente"}
     except Exception as e:
-        print(f"Error de verificación: {str(e)}")  # Debugging: Mostrar error de verificación
         raise HTTPException(status_code=400, detail="Firma no válida")
     
 def generate_x25519_keys():
