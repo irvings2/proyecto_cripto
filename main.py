@@ -395,7 +395,7 @@ async def firmar_mensaje(
     db.refresh(nueva_receta)
 
     # Guardar mensaje y firma en un archivo .txt
-    file_content = f"Mensaje: {mensaje}\n\nFirma Digital: {signature.hex()}"
+    file_content = f"idreceta: {nueva_receta.id}\n\nMensaje: {mensaje}\n\nFirma Digital: {signature.hex()}"
 
     # Guardar archivo en el directorio temporal
     file_name = f"firma_{nueva_receta.id}.txt"
