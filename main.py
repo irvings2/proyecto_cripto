@@ -436,6 +436,10 @@ async def verificar_firma(
         # Extraer la firma digital
         firma_hex = file_content_str.split("Firma Digital:")[1].strip()
 
+        print(f"Receta ID: {idreceta_str}")  # Debugging: Verificar idreceta
+        print(f"Mensaje: {mensaje}")  # Debugging: Verificar mensaje
+        print(f"Firma Hex: {firma_hex}")  # Debugging: Verificar firma
+
         # Convertir receta_id de string a entero
         try:
             idreceta = int(idreceta_str)
@@ -455,6 +459,8 @@ async def verificar_firma(
     if not receta:
         raise HTTPException(status_code=404, detail="Receta no encontrada")
 
+    print(f"Receta encontrada: {receta}")  # Debugging: Verificar si la receta existe
+
     # Obtener el medico_id de la receta
     medico_id = receta.medico_id
     if not medico_id:
@@ -464,6 +470,8 @@ async def verificar_firma(
     medico = db.query(Medico).filter(Medico.id == medico_id).first()
     if not medico:
         raise HTTPException(status_code=404, detail="Médico no encontrado")
+
+    print(f"Médico encontrado: {medico}")  # Debugging: Verificar si se encuentra el médico
 
     # Obtener la clave pública del médico desde la base de datos
     public_key_pem = medico.usuario.public_key_ed
@@ -486,6 +494,7 @@ async def verificar_firma(
         )
         return {"message": "Firma verificada correctamente"}
     except Exception as e:
+        print(f"Error de verificación: {str(e)}")  # Debugging: Mostrar error de verificación
         raise HTTPException(status_code=400, detail="Firma no válida")
     
 def generate_x25519_keys():
