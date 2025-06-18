@@ -522,11 +522,11 @@ def intercambiar_claves_x25519(private_key_pem, public_key_pem):
     # Cargar la clave privada X25519 desde el archivo PEM y convertirla a bytes crudos
     private_key = serialization.load_pem_private_key(private_key_pem, password=None, backend=default_backend())
 
-    # Convertir la clave privada X25519 a bytes crudos
+    # Convertir la clave privada X25519 a bytes crudos (Raw)
     private_key_bytes = private_key.private_bytes(
-        encoding=serialization.Encoding.Raw,
-        format=serialization.PrivateFormat.PKCS8,
-        encryption_algorithm=serialization.NoEncryption()
+        encoding=serialization.Encoding.Raw,  # Usar Raw como encoding
+        format=serialization.PrivateFormat.Raw,  # Usar Raw como format
+        encryption_algorithm=serialization.NoEncryption()  # NoEncryption
     )
 
     # Cargar la clave pública X25519 desde el archivo PEM
