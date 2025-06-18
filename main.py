@@ -6,9 +6,13 @@ from sqlalchemy.orm import sessionmaker, Session, relationship
 from sqlalchemy import select
 from pydantic import BaseModel
 from passlib.context import CryptContext
-from cryptography.hazmat.primitives.asymmetric import ed25519
-from cryptography.hazmat.primitives.asymmetric.x25519 import X25519PrivateKey
+from cryptography.hazmat.primitives.asymmetric import ed25519, x25519
+from cryptography.hazmat.primitives.asymmetric.x25519 import X25519PrivateKey, X25519PublicKey
 from cryptography.hazmat.primitives import serialization
+from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
+from cryptography.hazmat.primitives import hashes
+from cryptography.hazmat.backends import default_backend
+from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
 from io import BytesIO
 from fastapi.responses import FileResponse
 from typing import Union, Optional
@@ -343,76 +347,74 @@ async def download_file(filename: str):
     return FileResponse(file_path, media_type="application/pem", filename=filename)
 
 @app.post("/firmar_receta/")
-async def firmar_mensaje(
-    paciente_id: int = Form(...),  # Recibimos los parámetros como Form (ya que multipart/form-data los manda así)
+async def firmar_receta(
+    paciente_id: int = Form(...),
     medico_id: int = Form(...),
-    farmaceutico_id: Optional[int] = Form(None),
-    fecha_vencimiento: str = Form(...),  # La fecha de vencimiento
-    estado: str = Form("emitida"),  # Estado con valor por defecto
-    mensaje: str = Form(...),  # El mensaje a firmar
-    private_key_file: UploadFile = File(...),  # Recibimos la clave privada como archivo
+    fecha_vencimiento: str = Form(...),
+    estado: str = Form("emitida"),
+    mensaje: str = Form(...),
+    private_key_file_ed: UploadFile = File(...),  # Clave privada Ed25519
+    private_key_file_x255: UploadFile = File(...),  # Clave privada X25519
     db: Session = Depends(get_db)
 ):
-    # Verificar si el paciente existe
+    # Verificar si el paciente y el médico existen
     paciente = db.query(Paciente).filter(Paciente.id == paciente_id).first()
-    if not paciente:
-        raise HTTPException(status_code=404, detail="Paciente no encontrado")
-
-    # Verificar si el médico existe
     medico = db.query(Medico).filter(Medico.id == medico_id).first()
-    if not medico:
-        raise HTTPException(status_code=404, detail="Médico no encontrado")
-    
-    # Asegurarse de que el usuario que firma es un médico y que las llaves están generadas
-    if not medico.usuario.llavesgeneradas:
-        raise HTTPException(status_code=400, detail="Las llaves no han sido generadas para este médico")
 
-    # Leer la clave privada desde el archivo .pem
-    private_key_pem = await private_key_file.read()
-    try:
-        private_key = serialization.load_pem_private_key(private_key_pem, password=None)
-    except Exception as e:
-        raise HTTPException(status_code=400, detail="No se pudo cargar la clave privada del médico")
+    if not paciente or not medico:
+        raise HTTPException(status_code=404, detail="Paciente o médico no encontrado")
 
-    # Firmar el mensaje usando la clave privada
+    # Leer la clave privada Ed25519 desde el archivo .pem
+    private_key_ed_pem = await private_key_file_ed.read()
     try:
-        signature = private_key.sign(mensaje.encode())  # Firmar el mensaje con la clave privada
+        private_key_ed = ed25519.Ed25519PrivateKey.from_private_bytes(private_key_ed_pem)
     except Exception as e:
-        raise HTTPException(status_code=400, detail="Error al firmar el mensaje")
+        raise HTTPException(status_code=400, detail="No se pudo cargar la clave privada Ed25519")
+
+    # Leer la clave privada X25519 desde el archivo .pem
+    private_key_x255_pem = await private_key_file_x255.read()
+    try:
+        private_key_x255 = x25519.X25519PrivateKey.from_private_bytes(private_key_x255_pem)
+    except Exception as e:
+        raise HTTPException(status_code=400, detail="No se pudo cargar la clave privada X25519")
+
+    # Obtener la clave pública de X25519 del médico desde la base de datos
+    public_key_x255_pem = medico.usuario.public_key_x255
+    if not public_key_x255_pem:
+        raise HTTPException(status_code=404, detail="Clave pública X25519 no encontrada")
+
+    # Realizar el intercambio de claves y obtener la clave AES
+    aes_key = intercambiar_claves_x25519(private_key_x255.private_bytes(encoding=serialization.Encoding.PEM, format=serialization.PrivateFormat.PKCS8, encryption_algorithm=serialization.NoEncryption()), public_key_x255_pem)
+
+    # Cifrar el mensaje con AES-GCM
+    ciphertext, nonce, tag = cifrar_con_aes_gcm(mensaje, aes_key)
+
+    # Firmar el mensaje utilizando la clave privada Ed25519
+    signature = firmar_mensaje_con_ed25519(private_key_ed, mensaje)
 
     # Crear la receta con los datos proporcionados
     nueva_receta = Receta(
         paciente_id=paciente_id,
         medico_id=medico_id,
-        fecha_emision=datetime.utcnow(),  # Fecha actual de emisión
-        fecha_vencimiento=datetime.fromisoformat(fecha_vencimiento),  # Convertir a datetime
+        fecha_emision=datetime.utcnow(),
+        fecha_vencimiento=datetime.fromisoformat(fecha_vencimiento),
         estado=estado,
     )
 
-    # Agregar la receta a la base de datos
     db.add(nueva_receta)
     db.commit()
     db.refresh(nueva_receta)
 
-    # Guardar mensaje y firma en un archivo .txt
-    file_content = f"idreceta: {nueva_receta.id}\n\nMensaje: {mensaje}\n\nFirma Digital: {signature.hex()}"
-
-    # Guardar archivo en el directorio temporal
-    file_name = f"firma_{nueva_receta.id}.txt"
+    # Guardar el archivo cifrado en el directorio temporal
+    file_name = f"receta_firmada_{nueva_receta.id}.txt"
     file_path = os.path.join(TEMP_DIR, file_name)
+    with open(file_path, "wb") as file:
+        # Guardamos el nonce, el texto cifrado, el tag y la firma
+        file.write(nonce + ciphertext + tag + signature)
 
-    with open(file_path, "w") as file:
-        file.write(file_content)
-
-    # Retornar la respuesta con la URL para descargar el archivo generado
     return {
-        "message": "Receta firmada con éxito.",
-        "firma_digital": signature.hex(),  # Devolver la firma digital como un string hexadecimal
+        "message": "Receta firmada y cifrada con éxito.",
         "receta_id": nueva_receta.id,
-        "medico": medico.nombre,
-        "paciente": paciente.nombre,
-        "estado": nueva_receta.estado,
-        "fecha_vencimiento": nueva_receta.fecha_vencimiento,
         "download_url": f"/download/{file_name}"  # URL del archivo generado
     }
     
@@ -521,3 +523,45 @@ def generate_ed25519_keys():
     ).decode('utf-8')
     
     return private_key, public_key_pem
+
+def cifrar_con_aes_gcm(mensaje: str, key: bytes):
+    # Generar un nonce aleatorio para AES-GCM (12 bytes recomendado)
+    nonce = os.urandom(12)
+
+    # Convertir el mensaje a bytes
+    data = mensaje.encode()
+
+    # Crear el cifrador AES-GCM
+    cipher = Cipher(algorithms.AES(key), modes.GCM(nonce), backend=default_backend())
+    encryptor = cipher.encryptor()
+
+    # Cifrar el mensaje
+    ciphertext = encryptor.update(data) + encryptor.finalize()
+
+    # Obtener el tag de autenticación
+    tag = encryptor.tag
+
+    return ciphertext, nonce, tag
+
+def intercambiar_claves_x25519(private_key_pem, public_key_pem):
+    # Cargar la clave privada X25519 desde el archivo PEM (private_key_pem es un string PEM)
+    private_key = X25519PrivateKey.from_private_bytes(private_key_pem)
+
+    # Cargar la clave pública X25519 desde el archivo PEM (public_key_pem es un string PEM)
+    public_key = X25519PublicKey.from_public_bytes(public_key_pem.encode('utf-8'))  # Convertir a bytes
+
+    # Realizar el intercambio de claves
+    shared_key = private_key.exchange(public_key)
+
+    # Puedes usar el shared_key directamente para generar una clave AES o como una semilla.
+    # Para fines de AES, generamos una clave de 32 bytes (256 bits) a partir de la clave compartida
+    key = hashes.Hash(hashes.SHA256(), backend=default_backend())
+    key.update(shared_key)
+    aes_key = key.finalize()  # Esto genera una clave de 32 bytes
+
+    return aes_key
+
+def firmar_mensaje_con_ed25519(private_key_ed, mensaje):
+    # Firma del mensaje con la clave privada Ed25519
+    signature = private_key_ed.sign(mensaje.encode())  # Mensaje firmado
+    return signature
