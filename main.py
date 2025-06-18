@@ -366,17 +366,11 @@ async def firmar_receta(
 
     # Leer la clave privada Ed25519 desde el archivo .pem
     private_key_ed_pem = await private_key_file_ed.read()
-    try:
-        private_key_ed = ed25519.Ed25519PrivateKey.from_private_bytes(private_key_ed_pem)
-    except Exception as e:
-        raise HTTPException(status_code=400, detail="No se pudo cargar la clave privada Ed25519")
+    private_key_ed = cargar_clave_privada(private_key_ed_pem, clave_tipo="ed25519")  # Cargar clave privada Ed25519
 
     # Leer la clave privada X25519 desde el archivo .pem
     private_key_x255_pem = await private_key_file_x255.read()
-    try:
-        private_key_x255 = x25519.X25519PrivateKey.from_private_bytes(private_key_x255_pem)
-    except Exception as e:
-        raise HTTPException(status_code=400, detail="No se pudo cargar la clave privada X25519")
+    private_key_x255 = cargar_clave_privada(private_key_x255_pem, clave_tipo="x25519")  # Cargar clave privada X25519
 
     # Obtener la clave pública de X25519 del médico desde la base de datos
     public_key_x255_pem = medico.usuario.public_key_x255
@@ -524,6 +518,24 @@ def generate_ed25519_keys():
     
     return private_key, public_key_pem
 
+def intercambiar_claves_x25519(private_key_pem, public_key_pem):
+    # Cargar la clave privada X25519 desde el archivo PEM
+    private_key = x25519.X25519PrivateKey.from_private_bytes(private_key_pem)
+
+    # Cargar la clave pública X25519 desde el archivo PEM
+    public_key = x25519.X25519PublicKey.from_public_bytes(public_key_pem.encode('utf-8'))  # Convertir a bytes
+
+    # Realizar el intercambio de claves
+    shared_key = private_key.exchange(public_key)
+
+    # Usar el shared_key directamente para generar una clave AES
+    key = hashes.Hash(hashes.SHA256(), backend=default_backend())
+    key.update(shared_key)
+    aes_key = key.finalize()  # Esto genera una clave de 32 bytes (256 bits)
+
+    return aes_key
+
+# Cifrado con AES-GCM
 def cifrar_con_aes_gcm(mensaje: str, key: bytes):
     # Generar un nonce aleatorio para AES-GCM (12 bytes recomendado)
     nonce = os.urandom(12)
@@ -543,25 +555,24 @@ def cifrar_con_aes_gcm(mensaje: str, key: bytes):
 
     return ciphertext, nonce, tag
 
-def intercambiar_claves_x25519(private_key_pem, public_key_pem):
-    # Cargar la clave privada X25519 desde el archivo PEM (private_key_pem es un string PEM)
-    private_key = X25519PrivateKey.from_private_bytes(private_key_pem)
-
-    # Cargar la clave pública X25519 desde el archivo PEM (public_key_pem es un string PEM)
-    public_key = X25519PublicKey.from_public_bytes(public_key_pem.encode('utf-8'))  # Convertir a bytes
-
-    # Realizar el intercambio de claves
-    shared_key = private_key.exchange(public_key)
-
-    # Puedes usar el shared_key directamente para generar una clave AES o como una semilla.
-    # Para fines de AES, generamos una clave de 32 bytes (256 bits) a partir de la clave compartida
-    key = hashes.Hash(hashes.SHA256(), backend=default_backend())
-    key.update(shared_key)
-    aes_key = key.finalize()  # Esto genera una clave de 32 bytes
-
-    return aes_key
-
+# Función para firmar el mensaje con Ed25519
 def firmar_mensaje_con_ed25519(private_key_ed, mensaje):
     # Firma del mensaje con la clave privada Ed25519
-    signature = private_key_ed.sign(mensaje.encode())  # Mensaje firmado
+    signature = private_key_ed.sign(mensaje.encode())  # Firma el mensaje
     return signature
+
+# Función para cargar la clave privada
+def cargar_clave_privada(private_key_pem, clave_tipo="ed25519"):
+    try:
+        if clave_tipo == "ed25519":
+            # Cargar la clave privada Ed25519 desde el archivo PEM
+            private_key = serialization.load_pem_private_key(private_key_pem, password=None, backend=default_backend())
+            return private_key
+        elif clave_tipo == "x25519":
+            # Cargar la clave privada X25519 desde el archivo PEM
+            private_key = serialization.load_pem_private_key(private_key_pem, password=None, backend=default_backend())
+            return private_key
+        else:
+            raise HTTPException(status_code=400, detail="Tipo de clave desconocido.")
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"No se pudo cargar la clave privada: {e}")
