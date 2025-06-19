@@ -396,10 +396,6 @@ async def firmar_receta(
          # Generar la clave de AES con el intercambio de claves X25519
         aes_key = intercambiar_claves_x25519(private_key_x255_pem, public_key_x255_pem_paciente)  # Generar la clave AES con la clave pública del paciente
 
-        # Cifrar la clave de AES con las claves públicas de X25519 (médico, paciente, farmacéutico)
-        ciphertext_aes_key_paciente = cifrar_clave_aes_con_publica_x25519(aes_key, public_key_x255_pem_paciente)
-        ciphertext_aes_key_farmaceutico = cifrar_clave_aes_con_publica_x25519(aes_key, public_key_x255_pem_farmaceutico)
-
         # Cifrar el mensaje (receta) con la clave AES
         ciphertext, nonce, tag = cifrar_con_aes_gcm(mensaje, aes_key)
 
@@ -416,8 +412,7 @@ async def firmar_receta(
             nonce=nonce,  # Guardar el nonce
             tag=tag,  # Guardar el tag
             firma=signature,  # Guardar la firma
-            clave_aes_cifrada_paciente=ciphertext_aes_key_paciente,  # Guardar la clave AES cifrada para el paciente
-            clave_aes_cifrada_farmaceutico=ciphertext_aes_key_farmaceutico  # Guardar la clave AES cifrada para el farmacéutico
+            clave_aes=aes_key
         )
 
         db.add(nueva_receta)
@@ -535,43 +530,23 @@ def generate_ed25519_keys():
     
     return private_key, public_key_pem
 
-def cifrar_clave_aes_con_publica_x25519(aes_key, public_key_x255_pem):
-    
-    # Asegurarse de que la clave AES esté en formato bytes
-    if isinstance(aes_key, str):
-        aes_key = aes_key.encode('utf-8')  # Convertir a bytes si es un string
-        
-    # Cargar la clave pública X25519 del usuario (médico, paciente, farmacéutico)
-    public_key_x255 = serialization.load_pem_public_key(public_key_x255_pem.encode('utf-8'), backend=default_backend())
-
-    # Cifrar la clave de AES utilizando la clave pública X25519 del usuario
-    ciphertext_aes_key = public_key_x255.encrypt(aes_key)
-    
-    return ciphertext_aes_key
-
+# Función para intercambiar las claves X25519
 def intercambiar_claves_x25519(private_key_pem, public_key_pem):
-    try:
-        # Cargar la clave privada X25519 desde el archivo PEM
-        private_key = serialization.load_pem_private_key(private_key_pem, password=None, backend=default_backend())
+    # Cargar las claves desde los archivos PEM
+    private_key = serialization.load_pem_private_key(private_key_pem, password=None, backend=default_backend())
+    public_key = serialization.load_pem_public_key(public_key_pem.encode('utf-8'), backend=default_backend())
 
-        # Cargar la clave pública X25519 desde el archivo PEM
-        public_key = serialization.load_pem_public_key(public_key_pem.encode('utf-8'), backend=default_backend())
+    # Realizar el intercambio de claves para obtener una clave compartida
+    shared_key = private_key.exchange(public_key)
 
-        # Realizar el intercambio de claves
-        shared_key = private_key.exchange(public_key)
+    # Usamos directamente la clave compartida como clave AES (32 bytes)
+    aes_key = shared_key[:32]  # Asegurarnos de que sea de 256 bits (32 bytes)
 
-        # Usar el shared_key directamente para generar una clave AES
-        key = hashes.Hash(hashes.SHA256(), backend=default_backend())
-        key.update(shared_key)
-        aes_key = key.finalize()  # Esto genera una clave de 32 bytes (256 bits)
+    return aes_key
 
-        return aes_key
-    except Exception as e:
-        raise HTTPException(status_code=400, detail=f"Error al intercambiar claves: {e}")
-
-# Cifrado con AES-GCM
+# Función para cifrar el mensaje usando AES-GCM
 def cifrar_con_aes_gcm(mensaje: str, key: bytes):
-    # Generar un nonce aleatorio para AES-GCM (12 bytes recomendado)
+    # Generar un nonce aleatorio de 12 bytes
     nonce = os.urandom(12)
 
     # Convertir el mensaje a bytes
@@ -590,7 +565,7 @@ def cifrar_con_aes_gcm(mensaje: str, key: bytes):
     return ciphertext, nonce, tag
 
 # Función para firmar el mensaje con Ed25519
-def firmar_mensaje_con_ed25519(private_key_ed, mensaje):
+def firmar_mensaje_con_ed25519(private_key, mensaje):
     # Firma del mensaje con la clave privada Ed25519
-    signature = private_key_ed.sign(mensaje.encode())  # Firma el mensaje
+    signature = private_key.sign(mensaje.encode())
     return signature
