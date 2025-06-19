@@ -129,12 +129,11 @@ class Receta(Base):
     fecha_vencimiento = Column(TIMESTAMP, nullable=False)
     estado = Column(String(50), nullable=False, default='emitida')
     fecha_surtido = Column(TIMESTAMP, nullable=True)
-    receta_cifrada = Column(String, nullable=False, default='emitida')
+    receta_cifrada = Column(String)
     nonce = Column(String)
     tag = Column(String)
     firma = Column(String)
-    clave_aes_paciente = Column(String)
-    calve_aes_farmaceutico = Column(String)
+    clave_aes = Column(String)
 
     # Relaciones con otras tablas
     paciente = relationship("Paciente", back_populates="receta")
@@ -408,7 +407,7 @@ async def firmar_receta(
             medico_id=medico_id,
             estado="emitida",  # Ejemplo de estado
             fecha_emision=datetime.utcnow(),
-            mensaje_cifrado=ciphertext,  # Guardar el mensaje cifrado
+            receta_cifrada=ciphertext,  # Guardar el mensaje cifrado
             nonce=nonce,  # Guardar el nonce
             tag=tag,  # Guardar el tag
             firma=signature,  # Guardar la firma
