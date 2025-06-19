@@ -427,74 +427,67 @@ async def firmar_receta(
     
 @app.post("/verificar_firma/")
 async def verificar_firma(
-    archivo_firma: UploadFile = File(...),  # Recibimos el archivo que contiene el mensaje y la firma
+    idreceta: int,  # Recibimos el idreceta
+    mensaje: str,  # Recibimos el mensaje cifrado
     db: Session = Depends(get_db)
 ):
-    # Leer el archivo que contiene el idreceta, mensaje y la firma
-    file_content = await archivo_firma.read()
-
-    # Dividir el archivo en el idreceta, mensaje y firma (buscando las líneas correspondientes)
     try:
-        file_content_str = file_content.decode('utf-8')
-        # Extraer el idreceta
-        idreceta_str = file_content_str.split("idreceta:")[1].split("\n")[0].strip()
-        # Extraer el mensaje
-        mensaje = file_content_str.split("Mensaje:")[1].split("Firma Digital:")[0].strip()
-        # Extraer la firma digital
-        firma_hex = file_content_str.split("Firma Digital:")[1].strip()
+        # Obtener la receta desde la base de datos usando el idreceta
+        receta = db.query(Receta).filter(Receta.id == idreceta).first()
+        if not receta:
+            raise HTTPException(status_code=404, detail="Receta no encontrada")
 
-        # Convertir receta_id de string a entero
-        try:
-            idreceta = int(idreceta_str)
-        except ValueError:
-            raise HTTPException(status_code=400, detail="Receta ID no válido")
-    except ValueError:
-        raise HTTPException(status_code=400, detail="El archivo no tiene el formato esperado")
+        # Obtener el médico de la receta
+        medico_id = receta.medico_id
+        if not medico_id:
+            raise HTTPException(status_code=404, detail="Médico no asociado a la receta")
+        
+        # Obtener el médico desde la base de datos
+        medico = db.query(Medico).filter(Medico.id == medico_id).first()
+        if not medico:
+            raise HTTPException(status_code=404, detail="Médico no encontrado")
 
-    # Convertir la firma de hexadecimal a bytes
-    try:
-        firma = bytes.fromhex(firma_hex)
-    except ValueError:
-        raise HTTPException(status_code=400, detail="Firma no válida")
+        # Obtener la clave pública del médico desde la base de datos
+        public_key_pem = medico.usuario.public_key_ed
+        if not public_key_pem:
+            raise HTTPException(status_code=404, detail="Clave pública no encontrada para el médico")
 
-    # Obtener la receta desde la base de datos usando el idreceta
-    receta = db.query(Receta).filter(Receta.id == idreceta).first()
-    if not receta:
-        raise HTTPException(status_code=404, detail="Receta no encontrada")
-
-    # Obtener el medico_id de la receta
-    medico_id = receta.medico_id
-    if not medico_id:
-        raise HTTPException(status_code=404, detail="Médico no asociado a la receta")
-
-    # Obtener el médico desde la base de datos
-    medico = db.query(Medico).filter(Medico.id == medico_id).first()
-    if not medico:
-        raise HTTPException(status_code=404, detail="Médico no encontrado")
-
-    # Obtener la clave pública del médico desde la base de datos
-    public_key_pem = medico.usuario.public_key_ed
-    if not public_key_pem:
-        raise HTTPException(status_code=404, detail="Clave pública no encontrada para el médico")
-
-    try:
         # Cargar la clave pública desde el formato PEM
         public_key = serialization.load_pem_public_key(public_key_pem.encode('utf-8'))
-    except Exception as e:
-        raise HTTPException(status_code=400, detail="Error al cargar la clave pública")
 
-    # Usar Ed25519PublicKey para verificar la firma
-    try:
-        # Convertir la clave pública a Ed25519PublicKey
+        # Extraer la firma almacenada en la receta
+        firma = bytes.fromhex(receta.firma)  # Convertimos la firma de hex a bytes
+
+        # Obtener la clave AES (clave compartida derivada del intercambio de claves X25519)
+        aes_key = bytes.fromhex(receta.clave_aes)
+
+        # Obtener el nonce y el tag (guardados en la base de datos)
+        nonce = bytes.fromhex(receta.nonce)
+        tag = bytes.fromhex(receta.tag)
+
+        # Desencriptar el mensaje utilizando AES-GCM
+        cipher = Cipher(algorithms.AES(aes_key), modes.GCM(nonce, tag), backend=default_backend())
+        decryptor = cipher.decryptor()
+
+        # Desencriptar el mensaje
+        try:
+            mensaje_descifrado = decryptor.update(bytes.fromhex(receta.receta_cifrada)) + decryptor.finalize()
+        except Exception as e:
+            raise HTTPException(status_code=400, detail="Error al descifrar el mensaje")
+
+        # Verificar la firma usando Ed25519
         ed_key = public_key if isinstance(public_key, ed25519.Ed25519PublicKey) else None
         if not ed_key:
             raise HTTPException(status_code=400, detail="Clave pública no es de tipo Ed25519")
 
-        # Verificar la firma usando Ed25519
-        ed_key.verify(firma, mensaje.encode())  # Verificar firma sin padding ni hash
+        # Verificar la firma con el mensaje descifrado
+        ed_key.verify(firma, mensaje_descifrado)  # Verificar firma sin padding ni hash
+
+        # Si la firma es válida, devolver un mensaje de éxito
         return {"message": "Firma verificada correctamente"}
+
     except Exception as e:
-        raise HTTPException(status_code=400, detail="Firma no válida")
+        raise HTTPException(status_code=400, detail=f"Error al verificar la firma: {str(e)}")
     
 def generate_x25519_keys():
     
