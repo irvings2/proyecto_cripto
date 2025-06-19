@@ -536,6 +536,11 @@ def generate_ed25519_keys():
     return private_key, public_key_pem
 
 def cifrar_clave_aes_con_publica_x25519(aes_key, public_key_x255_pem):
+    
+    # Asegurarse de que la clave AES esté en formato bytes
+    if isinstance(aes_key, str):
+        aes_key = aes_key.encode('utf-8')  # Convertir a bytes si es un string
+        
     # Cargar la clave pública X25519 del usuario (médico, paciente, farmacéutico)
     public_key_x255 = serialization.load_pem_public_key(public_key_x255_pem.encode('utf-8'), backend=default_backend())
 
