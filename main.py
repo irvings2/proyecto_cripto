@@ -529,8 +529,21 @@ def intercambiar_claves_x25519(private_key_pem, public_key_pem):
         encryption_algorithm=serialization.NoEncryption()  # NoEncryption
     )
 
-    # Cargar la clave pública X25519 desde el archivo PEM
-    public_key = x25519.X25519PublicKey.from_public_bytes(public_key_pem.encode('utf-8'))  # Convertir a bytes
+    # Procesar la clave pública PEM y convertirla a bytes crudos
+    try:
+        # Extraer la clave pública de 32 bytes del formato PEM
+        public_key_bytes = serialization.load_pem_public_key(public_key_pem.encode('utf-8'), backend=default_backend()).public_bytes(
+            encoding=serialization.Encoding.Raw,
+            format=serialization.PublicFormat.Raw
+        )
+
+        if len(public_key_bytes) != 32:
+            raise HTTPException(status_code=400, detail="La clave pública X25519 debe tener 32 bytes")
+
+        # Cargar la clave pública X25519 desde los bytes crudos
+        public_key = x25519.X25519PublicKey.from_public_bytes(public_key_bytes)
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Error al cargar la clave pública X25519: {e}")
 
     # Realizar el intercambio de claves
     shared_key = private_key.exchange(public_key)
