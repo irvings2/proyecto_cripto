@@ -405,6 +405,7 @@ async def firmar_receta(
         nueva_receta = Receta(
             paciente_id=paciente_id,
             medico_id=medico_id,
+            farmaceutico_id=farmaceutico_id,
             estado="emitida",  # Ejemplo de estado
             fecha_emision=datetime.utcnow(),
             fecha_vencimiento=fecha_vencimiento,
