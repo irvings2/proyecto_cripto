@@ -555,7 +555,7 @@ def intercambiar_claves_x25519(private_key_pem, public_key_pem):
         private_key = serialization.load_pem_private_key(private_key_pem, password=None, backend=default_backend())
 
         # Cargar la clave pública X25519 desde el archivo PEM
-        public_key = serialization.load_pem_public_key(public_key_pem, backend=default_backend())
+        public_key = serialization.load_pem_public_key(public_key_pem.encode('utf-8'), backend=default_backend())
 
         # Realizar el intercambio de claves
         shared_key = private_key.exchange(public_key)
