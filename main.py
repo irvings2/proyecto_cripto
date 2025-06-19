@@ -428,7 +428,6 @@ async def firmar_receta(
 @app.post("/verificar_firma/")
 async def verificar_firma(
     idreceta: int,  # Recibimos el idreceta
-    mensaje: str,  # Recibimos el mensaje cifrado
     db: Session = Depends(get_db)
 ):
     try:
