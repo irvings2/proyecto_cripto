@@ -407,6 +407,7 @@ async def firmar_receta(
             medico_id=medico_id,
             estado="emitida",  # Ejemplo de estado
             fecha_emision=datetime.utcnow(),
+            fecha_vencimiento=fecha_vencimiento,
             receta_cifrada=ciphertext,  # Guardar el mensaje cifrado
             nonce=nonce,  # Guardar el nonce
             tag=tag,  # Guardar el tag
