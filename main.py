@@ -129,6 +129,12 @@ class Receta(Base):
     fecha_vencimiento = Column(TIMESTAMP, nullable=False)
     estado = Column(String(50), nullable=False, default='emitida')
     fecha_surtido = Column(TIMESTAMP, nullable=True)
+    receta_cifrada = Column(String, nullable=False, default='emitida')
+    nonce = Column(String)
+    tag = Column(String)
+    firma = Column(String)
+    clave_aes_paciente = Column(String)
+    calve_aes_farmaceutico = Column(String)
 
     # Relaciones con otras tablas
     paciente = relationship("Paciente", back_populates="receta")
@@ -350,6 +356,7 @@ async def download_file(filename: str):
 async def firmar_receta(
     paciente_id: int = Form(...),
     medico_id: int = Form(...),
+    farmaceutico_id: int = Form(...),
     fecha_vencimiento: str = Form(...),
     estado: str = Form("emitida"),
     mensaje: str = Form(...),
@@ -357,60 +364,70 @@ async def firmar_receta(
     private_key_file_x255: UploadFile = File(...),  # Clave privada X25519
     db: Session = Depends(get_db)
 ):
-    # Verificar si el paciente y el médico existen
-    paciente = db.query(Paciente).filter(Paciente.id == paciente_id).first()
-    medico = db.query(Medico).filter(Medico.id == medico_id).first()
+    try:
+        # Verificar si el paciente y el médico existen
+        paciente = db.query(Paciente).filter(Paciente.id == paciente_id).first()
+        medico = db.query(Medico).filter(Medico.id == medico_id).first()
+        farmaceutico = db.query(Farmaceutico).filter(Farmaceutico.id == farmaceutico_id).first()
 
-    if not paciente or not medico:
-        raise HTTPException(status_code=404, detail="Paciente o médico no encontrado")
+        if not paciente or not medico or not farmaceutico:
+            raise HTTPException(status_code=404, detail="Usuario no encontrado")
 
-    # Leer la clave privada Ed25519 desde el archivo .pem
-    private_key_ed_pem = await private_key_file_ed.read()
-    private_key_ed = cargar_clave_privada(private_key_ed_pem, clave_tipo="ed25519")  # Cargar clave privada Ed25519
+        # Cargar las claves privadas
+        private_key_ed_pem = await private_key_file_ed.read()
+        private_key_ed = serialization.load_pem_private_key(private_key_ed_pem, password=None, backend=default_backend())
 
-    # Leer la clave privada X25519 desde el archivo .pem
-    private_key_x255_pem = await private_key_file_x255.read()
-    private_key_x255 = cargar_clave_privada(private_key_x255_pem, clave_tipo="x25519")  # Cargar clave privada X25519
+        private_key_x255_pem = await private_key_file_x255.read()
+        private_key_x255 = serialization.load_pem_private_key(private_key_x255_pem, password=None, backend=default_backend()) # Cargar clave privada X25519
 
-    # Obtener la clave pública de X25519 del médico desde la base de datos
-    public_key_x255_pem = medico.usuario.public_key_x255
-    if not public_key_x255_pem:
-        raise HTTPException(status_code=404, detail="Clave pública X25519 no encontrada")
+        # Obtener la clave pública de X25519 del médico desde la base de datos
+        public_key_x255_pem_medico = medico.usuario.public_key_x255
+        if not public_key_x255_pem_medico:
+            raise HTTPException(status_code=404, detail="Clave pública X25519 no encontrada")
+        
+        public_key_x255_pem_paciente = paciente.usuario.public_key_x255
+        if not public_key_x255_pem_paciente:
+            raise HTTPException(status_code=404, detail="Clave pública X25519 no encontrada")
+        
+        public_key_x255_pem_farmaceutico = farmaceutico.usuario.public_key_x255
+        if not public_key_x255_pem_farmaceutico:
+            raise HTTPException(status_code=404, detail="Clave pública X25519 no encontrada")
 
-    # Realizar el intercambio de claves y obtener la clave AES
-    aes_key = intercambiar_claves_x25519(private_key_x255.private_bytes(encoding=serialization.Encoding.PEM, format=serialization.PrivateFormat.PKCS8, encryption_algorithm=serialization.NoEncryption()), public_key_x255_pem)
+         # Generar la clave de AES con el intercambio de claves X25519
+        aes_key = intercambiar_claves_x25519(private_key_x255_pem, public_key_x255_pem_paciente)  # Generar la clave AES con la clave pública del paciente
 
-    # Cifrar el mensaje con AES-GCM
-    ciphertext, nonce, tag = cifrar_con_aes_gcm(mensaje, aes_key)
+        # Cifrar la clave de AES con las claves públicas de X25519 (médico, paciente, farmacéutico)
+        ciphertext_aes_key_paciente = cifrar_clave_aes_con_publica_x25519(aes_key, public_key_x255_pem_paciente)
+        ciphertext_aes_key_farmaceutico = cifrar_clave_aes_con_publica_x25519(aes_key, public_key_x255_pem_farmaceutico)
 
-    # Firmar el mensaje utilizando la clave privada Ed25519
-    signature = firmar_mensaje_con_ed25519(private_key_ed, mensaje)
+        # Cifrar el mensaje (receta) con la clave AES
+        ciphertext, nonce, tag = cifrar_con_aes_gcm(mensaje, aes_key)
 
-    # Crear la receta con los datos proporcionados
-    nueva_receta = Receta(
-        paciente_id=paciente_id,
-        medico_id=medico_id,
-        fecha_emision=datetime.utcnow(),
-        fecha_vencimiento=datetime.fromisoformat(fecha_vencimiento),
-        estado=estado,
-    )
+        # Firmar el mensaje con la clave privada Ed25519
+        signature = firmar_mensaje_con_ed25519(private_key_ed, mensaje)
 
-    db.add(nueva_receta)
-    db.commit()
-    db.refresh(nueva_receta)
+        # Crear la receta y almacenar en la base de datos (clave AES cifrada para cada usuario)
+        nueva_receta = Receta(
+            paciente_id=paciente_id,
+            medico_id=medico_id,
+            estado="emitida",  # Ejemplo de estado
+            fecha_emision=datetime.utcnow(),
+            mensaje_cifrado=ciphertext,  # Guardar el mensaje cifrado
+            nonce=nonce,  # Guardar el nonce
+            tag=tag,  # Guardar el tag
+            firma=signature,  # Guardar la firma
+            clave_aes_cifrada_paciente=ciphertext_aes_key_paciente,  # Guardar la clave AES cifrada para el paciente
+            clave_aes_cifrada_farmaceutico=ciphertext_aes_key_farmaceutico  # Guardar la clave AES cifrada para el farmacéutico
+        )
 
-    # Guardar el archivo cifrado en el directorio temporal
-    file_name = f"receta_firmada_{nueva_receta.id}.txt"
-    file_path = os.path.join(TEMP_DIR, file_name)
-    with open(file_path, "wb") as file:
-        # Guardamos el nonce, el texto cifrado, el tag y la firma
-        file.write(nonce + ciphertext + tag + signature)
+        db.add(nueva_receta)
+        db.commit()
+        db.refresh(nueva_receta)
 
-    return {
-        "message": "Receta firmada y cifrada con éxito.",
-        "receta_id": nueva_receta.id,
-        "download_url": f"/download/{file_name}"  # URL del archivo generado
-    }
+        return {"message": "Receta firmada y cifrada con éxito", "receta_id": nueva_receta.id}
+        
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Error al firmar la receta: {e}")
     
 @app.post("/verificar_firma/")
 async def verificar_firma(
@@ -518,42 +535,34 @@ def generate_ed25519_keys():
     
     return private_key, public_key_pem
 
+def cifrar_clave_aes_con_publica_x25519(aes_key, public_key_x255_pem):
+    # Cargar la clave pública X25519 del usuario (médico, paciente, farmacéutico)
+    public_key_x255 = serialization.load_pem_public_key(public_key_x255_pem.encode('utf-8'), backend=default_backend())
+
+    # Cifrar la clave de AES utilizando la clave pública X25519 del usuario
+    ciphertext_aes_key = public_key_x255.encrypt(aes_key)
+    
+    return ciphertext_aes_key
+
 def intercambiar_claves_x25519(private_key_pem, public_key_pem):
-    # Cargar la clave privada X25519 desde el archivo PEM y convertirla a bytes crudos
-    private_key = serialization.load_pem_private_key(private_key_pem, password=None, backend=default_backend())
-
-    # Convertir la clave privada X25519 a bytes crudos (Raw)
-    private_key_bytes = private_key.private_bytes(
-        encoding=serialization.Encoding.Raw,  # Usar Raw como encoding
-        format=serialization.PrivateFormat.Raw,  # Usar Raw como format
-        encryption_algorithm=serialization.NoEncryption()  # NoEncryption
-    )
-
-    # Procesar la clave pública PEM y convertirla a bytes crudos
     try:
-        # Extraer la clave pública de 32 bytes del formato PEM
-        public_key_bytes = serialization.load_pem_public_key(public_key_pem.encode('utf-8'), backend=default_backend()).public_bytes(
-            encoding=serialization.Encoding.Raw,
-            format=serialization.PublicFormat.Raw
-        )
+        # Cargar la clave privada X25519 desde el archivo PEM
+        private_key = serialization.load_pem_private_key(private_key_pem, password=None, backend=default_backend())
 
-        if len(public_key_bytes) != 32:
-            raise HTTPException(status_code=400, detail="La clave pública X25519 debe tener 32 bytes")
+        # Cargar la clave pública X25519 desde el archivo PEM
+        public_key = serialization.load_pem_public_key(public_key_pem, backend=default_backend())
 
-        # Cargar la clave pública X25519 desde los bytes crudos
-        public_key = x25519.X25519PublicKey.from_public_bytes(public_key_bytes)
+        # Realizar el intercambio de claves
+        shared_key = private_key.exchange(public_key)
+
+        # Usar el shared_key directamente para generar una clave AES
+        key = hashes.Hash(hashes.SHA256(), backend=default_backend())
+        key.update(shared_key)
+        aes_key = key.finalize()  # Esto genera una clave de 32 bytes (256 bits)
+
+        return aes_key
     except Exception as e:
-        raise HTTPException(status_code=400, detail=f"Error al cargar la clave pública X25519: {e}")
-
-    # Realizar el intercambio de claves
-    shared_key = private_key.exchange(public_key)
-
-    # Usar el shared_key directamente para generar una clave AES
-    key = hashes.Hash(hashes.SHA256(), backend=default_backend())
-    key.update(shared_key)
-    aes_key = key.finalize()  # Esto genera una clave de 32 bytes (256 bits)
-
-    return aes_key
+        raise HTTPException(status_code=400, detail=f"Error al intercambiar claves: {e}")
 
 # Cifrado con AES-GCM
 def cifrar_con_aes_gcm(mensaje: str, key: bytes):
@@ -580,19 +589,3 @@ def firmar_mensaje_con_ed25519(private_key_ed, mensaje):
     # Firma del mensaje con la clave privada Ed25519
     signature = private_key_ed.sign(mensaje.encode())  # Firma el mensaje
     return signature
-
-# Función para cargar la clave privada
-def cargar_clave_privada(private_key_pem, clave_tipo="ed25519"):
-    try:
-        if clave_tipo == "ed25519":
-            # Cargar la clave privada Ed25519 desde el archivo PEM
-            private_key = serialization.load_pem_private_key(private_key_pem, password=None, backend=default_backend())
-            return private_key
-        elif clave_tipo == "x25519":
-            # Cargar la clave privada X25519 desde el archivo PEM
-            private_key = serialization.load_pem_private_key(private_key_pem, password=None, backend=default_backend())
-            return private_key
-        else:
-            raise HTTPException(status_code=400, detail="Tipo de clave desconocido.")
-    except Exception as e:
-        raise HTTPException(status_code=400, detail=f"No se pudo cargar la clave privada: {e}")
