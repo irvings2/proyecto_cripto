@@ -400,6 +400,12 @@ async def firmar_receta(
 
         # Firmar el mensaje con la clave privada Ed25519
         signature = firmar_mensaje_con_ed25519(private_key_ed, mensaje)
+        
+        firma_hex = signature.hex()  # Convertir la firma a hexadecimal
+        nonce_hex = nonce.hex()  # Convertir el nonce a hexadecimal
+        tag_hex = tag.hex()  # Convertir el tag a hexadecimal
+        aes_key_hex = aes_key.hex()  # Convertir la clave AES a hexadecimal
+        receta_cifrada_hex = ciphertext.hex()  # Convertir la receta cifrada a hexadecimal
 
         # Crear la receta y almacenar en la base de datos (clave AES cifrada para cada usuario)
         nueva_receta = Receta(
@@ -409,11 +415,11 @@ async def firmar_receta(
             estado="emitida",  # Ejemplo de estado
             fecha_emision=datetime.utcnow(),
             fecha_vencimiento=fecha_vencimiento,
-            receta_cifrada=ciphertext,  # Guardar el mensaje cifrado
-            nonce=nonce,  # Guardar el nonce
-            tag=tag,  # Guardar el tag
-            firma=signature,  # Guardar la firma
-            clave_aes=aes_key
+            receta_cifrada=receta_cifrada_hex,  # Guardar el mensaje cifrado
+            nonce=nonce_hex,  # Guardar el nonce
+            tag=tag_hex,  # Guardar el tag
+            firma=firma_hex,  # Guardar la firma
+            clave_aes=aes_key_hex
         )
 
         db.add(nueva_receta)
