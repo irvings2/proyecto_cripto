@@ -298,7 +298,7 @@ async def login(username: str, password: str, db: Session = Depends(get_db)):
     if not pwd_context.verify(password, user.password_hash):
         raise HTTPException(status_code=401, detail="Contraseña incorrecta")
 
-    # Si las llaves ya fueron generadas, devolvemos id, username y tipo
+    # Si ya se generaron llaves, devolvemos id, username y tipo
     if user.llavesgeneradas:
         return {
             "id": user.id,
@@ -330,15 +330,16 @@ async def login(username: str, password: str, db: Session = Depends(get_db)):
     with open(ed_file, "wb") as f: f.write(private_key_ed_pem)
     with open(x255_file, "wb") as f: f.write(private_key_x255_pem)
 
+    # Devolvemos siempre id y, además, las rutas de descarga al ZIP
     return {
         "id": user.id,
         "username": user.username,
         "tipo_usuario": user.tipo_usuario,
         "public_key_ed": public_key_ed,
         "public_key_x255": public_key_x255,
-        "private_key_ed_file": {"url": f"/download/keys/{username}"},
-        "private_key_x255_file": {"url": f"/download/keys/{username}"}
+        "private_key_zip": f"/download/keys/{username}"
     }
+
 
 
 
