@@ -296,34 +296,30 @@ async def create_usuario(usuario: Union[MedicoCreate, PacienteCreate, Farmaceuti
 from fastapi import FastAPI, Depends, HTTPException
 from sqlalchemy.orm import Session
 
+
 @app.post("/login/")
 async def login(username: str, password: str, db: Session = Depends(get_db)):
-    # 1. Buscamos al usuario
+    # 1) Buscar usuario
     user = db.query(Usuario).filter(Usuario.username == username).first()
     if not user:
         raise HTTPException(status_code=404, detail="Usuario no encontrado")
     if not pwd_context.verify(password, user.password_hash):
         raise HTTPException(status_code=401, detail="Contraseña incorrecta")
 
-    # 2. Determinamos el ID de su entidad según tipo_usuario
-    category_id = None
+    # 2) Obtener id de la categoría según tipo_usuario
     if user.tipo_usuario == "medico":
-        registro = db.query(Medico).filter(Medico.usuario_id == user.id).first()
-        if not registro:
-            raise HTTPException(status_code=404, detail="Médico no encontrado")
-        category_id = registro.id
+        record = db.query(Medico).filter(Medico.usuario_id == user.id).first()
     elif user.tipo_usuario == "paciente":
-        registro = db.query(Paciente).filter(Paciente.usuario_id == user.id).first()
-        if not registro:
-            raise HTTPException(status_code=404, detail="Paciente no encontrado")
-        category_id = registro.id
-    elif user.tipo_usuario == "farmaceutico":
-        registro = db.query(Farmaceutico).filter(Farmaceutico.usuario_id == user.id).first()
-        if not registro:
-            raise HTTPException(status_code=404, detail="Farmacéutico no encontrado")
-        category_id = registro.id
+        record = db.query(Paciente).filter(Paciente.usuario_id == user.id).first()
+    else:  # farmacéutico
+        record = db.query(Farmaceutico).filter(Farmaceutico.usuario_id == user.id).first()
 
-    # 3. Si ya tenía llaves generadas, devolvemos el ID de su tabla
+    if not record:
+        raise HTTPException(status_code=404, detail=f"{user.tipo_usuario.capitalize()} no encontrado")
+
+    category_id = record.id
+
+    # 3) Si ya se generaron llaves, devolvemos solo lo esencial
     if user.llavesgeneradas:
         return {
             "user_id": category_id,
@@ -331,41 +327,39 @@ async def login(username: str, password: str, db: Session = Depends(get_db)):
             "tipo_usuario": user.tipo_usuario
         }
 
-    # 4. Generación inicial de llaves
-    private_key_ed, public_key_ed = generate_ed25519_keys()
-    private_key_x255, public_key_x255 = generate_x25519_keys()
-    user.public_key_ed = public_key_ed
-    user.public_key_x255 = public_key_x255
+    # 4) Primer login: generamos y guardamos llaves
+    priv_ed, pub_ed = generate_ed25519_keys()
+    priv_x,   pub_x   = generate_x25519_keys()
+    user.public_key_ed   = pub_ed
+    user.public_key_x255 = pub_x
     user.llavesgeneradas = True
     db.commit()
 
-    # 5. Serializar y guardar claves privadas en temp
-    ed_pem = private_key_ed.private_bytes(
+    # 5) Serializar y guardar PEMs
+    ed_pem = priv_ed.private_bytes(
         encoding=serialization.Encoding.PEM,
         format=serialization.PrivateFormat.PKCS8,
         encryption_algorithm=serialization.NoEncryption()
     )
-    x255_pem = private_key_x255.private_bytes(
+    x_pem = priv_x.private_bytes(
         encoding=serialization.Encoding.PEM,
         format=serialization.PrivateFormat.PKCS8,
         encryption_algorithm=serialization.NoEncryption()
     )
-    ed_path = os.path.join(TEMP_DIR, f"private_key_ed_{username}.pem")
-    x255_path = os.path.join(TEMP_DIR, f"private_key_x255_{username}.pem")
+    ed_path  = os.path.join(TEMP_DIR, f"private_key_ed_{username}.pem")
+    x_path   = os.path.join(TEMP_DIR, f"private_key_x255_{username}.pem")
     with open(ed_path, "wb") as f: f.write(ed_pem)
-    with open(x255_path, "wb") as f: f.write(x255_pem)
+    with open(x_path,  "wb") as f: f.write(x_pem)
 
-    # 6. Devolvemos user_id (de su tabla), tipo y rutas de descarga
+    # 6) Devolver ID de categoría, credenciales y URL de descarga
     return {
         "user_id": category_id,
         "username": user.username,
         "tipo_usuario": user.tipo_usuario,
-        "public_key_ed": public_key_ed,
-        "public_key_x255": public_key_x255,
+        "public_key_ed": pub_ed,
+        "public_key_x255": pub_x,
         "private_key_zip": f"/download/keys/{username}"
     }
-
-
 
 @app.get("/download/keys/{filename}")
 async def download_all_keys(username: str):
