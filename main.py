@@ -297,34 +297,69 @@ from fastapi import FastAPI, Depends, HTTPException
 from sqlalchemy.orm import Session
 
 
+from fastapi import FastAPI, Depends, HTTPException
+from sqlalchemy.orm import Session
+from passlib.context import CryptContext
+import os, serialization
+
+from .database import get_db
+from .models import Usuario, Medico, Paciente, Farmaceutico
+from .security import generate_ed25519_keys, generate_x25519_keys, TEMP_DIR
+
+pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
+app = FastAPI()
+
 @app.post("/login/")
 async def login(username: str, password: str, db: Session = Depends(get_db)):
-    # 1) Buscar usuario
+    # 1) Validar existencia de usuario y contraseña
     user = db.query(Usuario).filter(Usuario.username == username).first()
     if not user:
         raise HTTPException(status_code=404, detail="Usuario no encontrado")
     if not pwd_context.verify(password, user.password_hash):
         raise HTTPException(status_code=401, detail="Contraseña incorrecta")
 
-    # 2) Obtener id de la categoría según tipo_usuario
+    # 2) Según su tipo, obtenemos el registro y su PK
+    medico_id = paciente_id = farmaceutico_id = None
+
     if user.tipo_usuario == "medico":
-        record = db.query(Medico).filter(Medico.usuario_id == user.id).first()
+        medico = (
+            db.query(Medico)
+              .filter(Medico.usuario_id == user.id)
+              .first()
+        )
+        if not medico:
+            raise HTTPException(status_code=404, detail="Médico no encontrado")
+        medico_id = medico.id
+
     elif user.tipo_usuario == "paciente":
-        record = db.query(Paciente).filter(Paciente.usuario_id == user.id).first()
+        paciente = (
+            db.query(Paciente)
+              .filter(Paciente.usuario_id == user.id)
+              .first()
+        )
+        if not paciente:
+            raise HTTPException(status_code=404, detail="Paciente no encontrado")
+        paciente_id = paciente.id
+
     else:  # farmacéutico
-        record = db.query(Farmaceutico).filter(Farmaceutico.usuario_id == user.id).first()
+        farma = (
+            db.query(Farmaceutico)
+              .filter(Farmaceutico.usuario_id == user.id)
+              .first()
+        )
+        if not farma:
+            raise HTTPException(status_code=404, detail="Farmacéutico no encontrado")
+        farmaceutico_id = farma.id
 
-    if not record:
-        raise HTTPException(status_code=404, detail=f"{user.tipo_usuario.capitalize()} no encontrado")
-
-    category_id = record.id
-
-    # 3) Si ya se generaron llaves, devolvemos solo lo esencial
+    # 3) Si ya tenía llaves, devolvemos sólo los IDs y metadatos
     if user.llavesgeneradas:
         return {
-            "user_id": category_id,
-            "username": user.username,
-            "tipo_usuario": user.tipo_usuario
+            "usuario_id":      user.id,
+            "medico_id":       medico_id,
+            "paciente_id":     paciente_id,
+            "farmaceutico_id": farmaceutico_id,
+            "username":        user.username,
+            "tipo_usuario":    user.tipo_usuario
         }
 
     # 4) Primer login: generamos y guardamos llaves
@@ -335,7 +370,7 @@ async def login(username: str, password: str, db: Session = Depends(get_db)):
     user.llavesgeneradas = True
     db.commit()
 
-    # 5) Serializar y guardar PEMs
+    # 5) Guardar las claves privadas en temp/
     ed_pem = priv_ed.private_bytes(
         encoding=serialization.Encoding.PEM,
         format=serialization.PrivateFormat.PKCS8,
@@ -346,20 +381,24 @@ async def login(username: str, password: str, db: Session = Depends(get_db)):
         format=serialization.PrivateFormat.PKCS8,
         encryption_algorithm=serialization.NoEncryption()
     )
-    ed_path  = os.path.join(TEMP_DIR, f"private_key_ed_{username}.pem")
-    x_path   = os.path.join(TEMP_DIR, f"private_key_x255_{username}.pem")
+    ed_path  = os.path.join(TEMP_DIR,   f"private_key_ed_{username}.pem")
+    xp_path  = os.path.join(TEMP_DIR,   f"private_key_x255_{username}.pem")
     with open(ed_path, "wb") as f: f.write(ed_pem)
-    with open(x_path,  "wb") as f: f.write(x_pem)
+    with open(xp_path, "wb") as f: f.write(x_pem)
 
-    # 6) Devolver ID de categoría, credenciales y URL de descarga
+    # 6) Devolver ambos IDs, metadatos y URL de descarga
     return {
-        "user_id": category_id,
-        "username": user.username,
-        "tipo_usuario": user.tipo_usuario,
-        "public_key_ed": pub_ed,
+        "usuario_id":      user.id,
+        "medico_id":       medico_id,
+        "paciente_id":     paciente_id,
+        "farmaceutico_id": farmaceutico_id,
+        "username":        user.username,
+        "tipo_usuario":    user.tipo_usuario,
+        "public_key_ed":   pub_ed,
         "public_key_x255": pub_x,
         "private_key_zip": f"/download/keys/{username}"
     }
+
 
 @app.get("/download/keys/{filename}")
 async def download_all_keys(username: str):
