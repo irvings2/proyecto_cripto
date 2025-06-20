@@ -346,6 +346,34 @@ async def login(username: str, password: str, db: Session = Depends(get_db)):
     }
 
 
+@app.get("/download/keys/{filename}")
+async def download_all_keys(username: str):
+    """
+    Empaqueta private_key_ed_<username>.pem y private_key_x255_<username>.pem 
+    en un ZIP y lo devuelve en una sola respuesta.
+    """
+    # Rutas de los archivos
+    ed_path   = os.path.join(TEMP_DIR, f"private_key_ed_{username}.pem")
+    x255_path = os.path.join(TEMP_DIR, f"private_key_x255_{username}.pem")
+
+    # Validar que existan ambos
+    if not os.path.exists(ed_path) or not os.path.exists(x255_path):
+        raise HTTPException(status_code=404, detail="Alguna de las claves no existe")
+
+    # Crear un ZIP en memoria
+    buffer = BytesIO()
+    with zipfile.ZipFile(buffer, mode="w", compression=zipfile.ZIP_DEFLATED) as zipf:
+        zipf.write(ed_path,   arcname=os.path.basename(ed_path))
+        zipf.write(x255_path, arcname=os.path.basename(x255_path))
+    buffer.seek(0)
+
+    # Devolverlo como streaming
+    return StreamingResponse(
+        buffer,
+        media_type="application/zip",
+        headers={"Content-Disposition": f"attachment; filename=keys_{username}.zip"}
+    )
+
 @app.post("/firmar_receta/")
 async def firmar_receta(
     paciente_id: int = Form(...),
@@ -571,9 +599,20 @@ async def recetas_por_paciente(paciente_id: int, db: Session = Depends(get_db)):
     return {"recetas": [r.id for r in recetas]}
 
 # Consulta de recetas emitidas por un médico específico
-@app.get("/recetas/medico/{medico_id}")
-async def recetas_por_medico(medico_id: int, db: Session = Depends(get_db)):
-    recetas = db.query(Receta).filter(Receta.medico_id == medico_id).all()
+@app.get("/recetas/medico/{username}")
+async def recetas_por_medico(username: str, db: Session = Depends(get_db)):
+    # Buscamos el médico asociado al username
+    medico = (
+        db.query(Medico)
+          .join(Usuario, Medico.usuario_id == Usuario.id)
+          .filter(Usuario.username == username)
+          .first()
+    )
+    if not medico:
+        raise HTTPException(status_code=404, detail="Médico no encontrado")
+
+    # Obtenemos todas las recetas de ese médico
+    recetas = db.query(Receta).filter(Receta.medico_id == medico.id).all()
     return {"recetas": [r.id for r in recetas]}
 
 # Consulta de recetas asignadas a un farmacéutico específico
@@ -680,20 +719,27 @@ async def ver_receta_paciente(
     return {
         "mensaje_descifrado": mensaje.decode()
     }
-@app.get("/download/keys/{username}")
-async def download_all_keys(username: str):
-    ed_path = os.path.join(TEMP_DIR, f"private_key_ed_{username}.pem")
-    x_path = os.path.join(TEMP_DIR, f"private_key_x255_{username}.pem")
-    if not os.path.exists(ed_path) or not os.path.exists(x_path):
-        raise HTTPException(status_code=404, detail="Alguna de las claves no existe")
-    buffer = BytesIO()
-    with zipfile.ZipFile(buffer, mode="w", compression=zipfile.ZIP_DEFLATED) as z:
-        z.write(ed_path, arcname=os.path.basename(ed_path))
-        z.write(x_path, arcname=os.path.basename(x_path))
-    buffer.seek(0)
-    return StreamingResponse(
-        buffer,
-        media_type="application/zip",
-        headers={"Content-Disposition": f"attachment; filename=keys_{username}.zip"}
-    )
+    @app.get("/download/keys/{username}")
+    async def download_all_keys(username: str):
+        """
+        Empaqueta private_key_ed_<username>.pem y private_key_x255_<username>.pem 
+        en un ZIP y lo devuelve en una sola respuesta.
+        """
+        ed_path   = os.path.join(TEMP_DIR, f"private_key_ed_{username}.pem")
+        x255_path = os.path.join(TEMP_DIR, f"private_key_x255_{username}.pem")
+
+        if not os.path.exists(ed_path) or not os.path.exists(x255_path):
+            raise HTTPException(status_code=404, detail="Alguna de las claves no existe")
+
+        buffer = BytesIO()
+        with zipfile.ZipFile(buffer, mode="w", compression=zipfile.ZIP_DEFLATED) as zipf:
+            zipf.write(ed_path,   arcname=os.path.basename(ed_path))
+            zipf.write(x255_path, arcname=os.path.basename(x255_path))
+        buffer.seek(0)
+
+        return StreamingResponse(
+            buffer,
+            media_type="application/zip",
+            headers={"Content-Disposition": f"attachment; filename=keys_{username}.zip"}
+        )
 
