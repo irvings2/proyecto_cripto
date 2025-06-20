@@ -708,10 +708,12 @@ async def ver_receta_paciente(
     return {
         "mensaje_descifrado": mensaje.decode()
     }
-
     @app.get("/download/keys/{username}")
     async def download_all_keys(username: str):
-
+        """
+        Empaqueta private_key_ed_<username>.pem y private_key_x255_<username>.pem 
+        en un ZIP y lo devuelve en una sola respuesta.
+        """
         ed_path   = os.path.join(TEMP_DIR, f"private_key_ed_{username}.pem")
         x255_path = os.path.join(TEMP_DIR, f"private_key_x255_{username}.pem")
 
