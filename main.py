@@ -309,6 +309,7 @@ from .security import generate_ed25519_keys, generate_x25519_keys, TEMP_DIR
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 app = FastAPI()
 
+
 @app.post("/login/")
 async def login(username: str, password: str, db: Session = Depends(get_db)):
     # 1) Validar existencia de usuario y contraseña
@@ -318,51 +319,33 @@ async def login(username: str, password: str, db: Session = Depends(get_db)):
     if not pwd_context.verify(password, user.password_hash):
         raise HTTPException(status_code=401, detail="Contraseña incorrecta")
 
-    # 2) Según su tipo, obtenemos el registro y su PK
-    medico_id = paciente_id = farmaceutico_id = None
-
+    # 2) Extraer sólo el id de la tabla correspondiente
     if user.tipo_usuario == "medico":
-        medico = (
-            db.query(Medico)
-              .filter(Medico.usuario_id == user.id)
-              .first()
-        )
-        if not medico:
-            raise HTTPException(status_code=404, detail="Médico no encontrado")
-        medico_id = medico.id
-
+        category_id = db.query(Medico.id) \
+                        .filter(Medico.usuario_id == user.id) \
+                        .scalar()
     elif user.tipo_usuario == "paciente":
-        paciente = (
-            db.query(Paciente)
-              .filter(Paciente.usuario_id == user.id)
-              .first()
-        )
-        if not paciente:
-            raise HTTPException(status_code=404, detail="Paciente no encontrado")
-        paciente_id = paciente.id
-
+        category_id = db.query(Paciente.id) \
+                        .filter(Paciente.usuario_id == user.id) \
+                        .scalar()
     else:  # farmacéutico
-        farma = (
-            db.query(Farmaceutico)
-              .filter(Farmaceutico.usuario_id == user.id)
-              .first()
-        )
-        if not farma:
-            raise HTTPException(status_code=404, detail="Farmacéutico no encontrado")
-        farmaceutico_id = farma.id
+        category_id = db.query(Farmaceutico.id) \
+                        .filter(Farmaceutico.usuario_id == user.id) \
+                        .scalar()
 
-    # 3) Si ya tenía llaves, devolvemos sólo los IDs y metadatos
+    if category_id is None:
+        raise HTTPException(status_code=404, detail=f"{user.tipo_usuario.capitalize()} no encontrado")
+
+    # 3) Si ya existían llaves, devolvemos ambos IDs y metadatos
     if user.llavesgeneradas:
         return {
-            "usuario_id":      user.id,
-            "medico_id":       medico_id,
-            "paciente_id":     paciente_id,
-            "farmaceutico_id": farmaceutico_id,
-            "username":        user.username,
-            "tipo_usuario":    user.tipo_usuario
+            "usuario_id":   user.id,
+            "category_id":  category_id,
+            "username":     user.username,
+            "tipo_usuario": user.tipo_usuario
         }
 
-    # 4) Primer login: generamos y guardamos llaves
+    # 4) Primer login: generamos y almacenamos llaves
     priv_ed, pub_ed = generate_ed25519_keys()
     priv_x,   pub_x   = generate_x25519_keys()
     user.public_key_ed   = pub_ed
@@ -370,7 +353,7 @@ async def login(username: str, password: str, db: Session = Depends(get_db)):
     user.llavesgeneradas = True
     db.commit()
 
-    # 5) Guardar las claves privadas en temp/
+    # 5) Guardar PEMs en TEMP_DIR
     ed_pem = priv_ed.private_bytes(
         encoding=serialization.Encoding.PEM,
         format=serialization.PrivateFormat.PKCS8,
@@ -381,17 +364,15 @@ async def login(username: str, password: str, db: Session = Depends(get_db)):
         format=serialization.PrivateFormat.PKCS8,
         encryption_algorithm=serialization.NoEncryption()
     )
-    ed_path  = os.path.join(TEMP_DIR,   f"private_key_ed_{username}.pem")
-    xp_path  = os.path.join(TEMP_DIR,   f"private_key_x255_{username}.pem")
-    with open(ed_path, "wb") as f: f.write(ed_pem)
-    with open(xp_path, "wb") as f: f.write(x_pem)
+    ed_path   = os.path.join(TEMP_DIR, f"private_key_ed_{username}.pem")
+    x255_path = os.path.join(TEMP_DIR, f"private_key_x255_{username}.pem")
+    with open(ed_path,   "wb") as f: f.write(ed_pem)
+    with open(x255_path, "wb") as f: f.write(x_pem)
 
-    # 6) Devolver ambos IDs, metadatos y URL de descarga
+    # 6) Devolver IDs, llaves públicas y URL del ZIP
     return {
         "usuario_id":      user.id,
-        "medico_id":       medico_id,
-        "paciente_id":     paciente_id,
-        "farmaceutico_id": farmaceutico_id,
+        "category_id":     category_id,
         "username":        user.username,
         "tipo_usuario":    user.tipo_usuario,
         "public_key_ed":   pub_ed,
