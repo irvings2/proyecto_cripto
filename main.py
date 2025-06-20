@@ -290,61 +290,56 @@ async def create_usuario(usuario: Union[MedicoCreate, PacienteCreate, Farmaceuti
     
     # Si el tipo de usuario no es reconocido
     raise HTTPException(status_code=400, detail="Tipo de usuario no válido.")
-
 @app.post("/login/")
 async def login(username: str, password: str, db: Session = Depends(get_db)):
     user = db.query(Usuario).filter(Usuario.username == username).first()
-
     if not user:
         raise HTTPException(status_code=404, detail="Usuario no encontrado")
-    
     if not pwd_context.verify(password, user.password_hash):
         raise HTTPException(status_code=401, detail="Contraseña incorrecta")
 
+    # Si las llaves ya fueron generadas, devolvemos id, username y tipo
     if user.llavesgeneradas:
-        return {"username": user.username, "tipo_usuario": user.tipo_usuario}
-    
+        return {
+            "id": user.id,
+            "username": user.username,
+            "tipo_usuario": user.tipo_usuario
+        }
+
+    # Primer login: generamos llaves
     private_key_ed, public_key_ed = generate_ed25519_keys()
     private_key_x255, public_key_x255 = generate_x25519_keys()
-    
     user.public_key_ed = public_key_ed
     user.public_key_x255 = public_key_x255
     user.llavesgeneradas = True
     db.commit()
 
-    # Guardar las claves privadas en archivos temporales
+    # Serializamos y guardamos las privadas en temp
     private_key_ed_pem = private_key_ed.private_bytes(
         encoding=serialization.Encoding.PEM,
         format=serialization.PrivateFormat.PKCS8,
         encryption_algorithm=serialization.NoEncryption()
     )
-    
     private_key_x255_pem = private_key_x255.private_bytes(
         encoding=serialization.Encoding.PEM,
         format=serialization.PrivateFormat.PKCS8,
         encryption_algorithm=serialization.NoEncryption()
     )
+    ed_file = os.path.join(TEMP_DIR, f"private_key_ed_{username}.pem")
+    x255_file = os.path.join(TEMP_DIR, f"private_key_x255_{username}.pem")
+    with open(ed_file, "wb") as f: f.write(private_key_ed_pem)
+    with open(x255_file, "wb") as f: f.write(private_key_x255_pem)
 
-    # Guardar los archivos en el sistema de archivos temporal
-    ed_file_path = os.path.join(TEMP_DIR, f"private_key_ed_{username}.pem")
-    x255_file_path = os.path.join(TEMP_DIR, f"private_key_x255_{username}.pem")
-
-    with open(ed_file_path, "wb") as ed_file:
-        ed_file.write(private_key_ed_pem)
-
-    with open(x255_file_path, "wb") as x255_file:
-        x255_file.write(private_key_x255_pem)
-
-    # Devolver las URLs de los archivos generados
     return {
         "id": user.id,
         "username": user.username,
         "tipo_usuario": user.tipo_usuario,
         "public_key_ed": public_key_ed,
         "public_key_x255": public_key_x255,
-        "private_key_ed_file": {"url": f"/download/{os.path.basename(ed_file_path)}"},
-        "private_key_x255_file": {"url": f"/download/{os.path.basename(x255_file_path)}"}
+        "private_key_ed_file": {"url": f"/download/keys/{username}"},
+        "private_key_x255_file": {"url": f"/download/keys/{username}"}
     }
+
 
 
 @app.get("/download/keys/{filename}")
