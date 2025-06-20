@@ -18,6 +18,9 @@ from fastapi.responses import FileResponse
 from typing import Union, Optional
 from datetime import datetime
 from tempfile import NamedTemporaryFile
+import zipfile
+from io import BytesIO
+from fastapi.responses import StreamingResponse
 import os
 
 DATABASE_URL = "postgresql://postgres.gijqjegotyhtdbngcuth:nedtu3-ruqvec-mixSew@aws-0-us-east-2.pooler.supabase.com:6543/postgres"
@@ -342,14 +345,34 @@ async def login(username: str, password: str, db: Session = Depends(get_db)):
         "private_key_x255_file": {"url": f"/download/{os.path.basename(x255_file_path)}"}
     }
 
-@app.get("/download/{filename}")
-async def download_file(filename: str):
-    file_path = os.path.join(TEMP_DIR, filename)
 
-    if not os.path.exists(file_path):
-        raise HTTPException(status_code=404, detail="File not found")
-    
-    return FileResponse(file_path, media_type="application/pem", filename=filename)
+@app.get("/download/keys/{filename}")
+async def download_all_keys(username: str):
+    """
+    Empaqueta private_key_ed_<username>.pem y private_key_x255_<username>.pem 
+    en un ZIP y lo devuelve en una sola respuesta.
+    """
+    # Rutas de los archivos
+    ed_path   = os.path.join(TEMP_DIR, f"private_key_ed_{username}.pem")
+    x255_path = os.path.join(TEMP_DIR, f"private_key_x255_{username}.pem")
+
+    # Validar que existan ambos
+    if not os.path.exists(ed_path) or not os.path.exists(x255_path):
+        raise HTTPException(status_code=404, detail="Alguna de las claves no existe")
+
+    # Crear un ZIP en memoria
+    buffer = BytesIO()
+    with zipfile.ZipFile(buffer, mode="w", compression=zipfile.ZIP_DEFLATED) as zipf:
+        zipf.write(ed_path,   arcname=os.path.basename(ed_path))
+        zipf.write(x255_path, arcname=os.path.basename(x255_path))
+    buffer.seek(0)
+
+    # Devolverlo como streaming
+    return StreamingResponse(
+        buffer,
+        media_type="application/zip",
+        headers={"Content-Disposition": f"attachment; filename=keys_{username}.zip"}
+    )
 
 @app.post("/firmar_receta/")
 async def firmar_receta(
@@ -620,7 +643,7 @@ async def surtir_receta(
     
     # Derivar clave AES y descifrar mensaje
     try:
-        aes_key = intercambiar_claves_x25519(private_key_x255_pem, paciente.usuario.public_key_x255)
+        aes_key = bytes.fromhex(receta.clave_aes) 
         cipher = Cipher(algorithms.AES(aes_key), modes.GCM(bytes.fromhex(receta.nonce), bytes.fromhex(receta.tag)), backend=default_backend())
         decryptor = cipher.decryptor()
         mensaje = decryptor.update(bytes.fromhex(receta.receta_cifrada)) + decryptor.finalize()
@@ -638,6 +661,7 @@ async def surtir_receta(
         "receta_id": receta.id,
         "contenido_receta": mensaje.decode()
     }
+
 # Listado de recetas por paciente
 @app.get("/recetas/paciente/{paciente_id}")
 async def recetas_por_paciente(paciente_id: int, db: Session = Depends(get_db)):
@@ -684,3 +708,25 @@ async def ver_receta_paciente(
     return {
         "mensaje_descifrado": mensaje.decode()
     }
+
+    @app.get("/download/keys/{username}")
+    async def download_all_keys(username: str):
+
+        ed_path   = os.path.join(TEMP_DIR, f"private_key_ed_{username}.pem")
+        x255_path = os.path.join(TEMP_DIR, f"private_key_x255_{username}.pem")
+
+        if not os.path.exists(ed_path) or not os.path.exists(x255_path):
+            raise HTTPException(status_code=404, detail="Alguna de las claves no existe")
+
+        buffer = BytesIO()
+        with zipfile.ZipFile(buffer, mode="w", compression=zipfile.ZIP_DEFLATED) as zipf:
+            zipf.write(ed_path,   arcname=os.path.basename(ed_path))
+            zipf.write(x255_path, arcname=os.path.basename(x255_path))
+        buffer.seek(0)
+
+        return StreamingResponse(
+            buffer,
+            media_type="application/zip",
+            headers={"Content-Disposition": f"attachment; filename=keys_{username}.zip"}
+        )
+
