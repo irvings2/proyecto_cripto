@@ -346,34 +346,6 @@ async def login(username: str, password: str, db: Session = Depends(get_db)):
     }
 
 
-@app.get("/download/keys/{filename}")
-async def download_all_keys(username: str):
-    """
-    Empaqueta private_key_ed_<username>.pem y private_key_x255_<username>.pem 
-    en un ZIP y lo devuelve en una sola respuesta.
-    """
-    # Rutas de los archivos
-    ed_path   = os.path.join(TEMP_DIR, f"private_key_ed_{username}.pem")
-    x255_path = os.path.join(TEMP_DIR, f"private_key_x255_{username}.pem")
-
-    # Validar que existan ambos
-    if not os.path.exists(ed_path) or not os.path.exists(x255_path):
-        raise HTTPException(status_code=404, detail="Alguna de las claves no existe")
-
-    # Crear un ZIP en memoria
-    buffer = BytesIO()
-    with zipfile.ZipFile(buffer, mode="w", compression=zipfile.ZIP_DEFLATED) as zipf:
-        zipf.write(ed_path,   arcname=os.path.basename(ed_path))
-        zipf.write(x255_path, arcname=os.path.basename(x255_path))
-    buffer.seek(0)
-
-    # Devolverlo como streaming
-    return StreamingResponse(
-        buffer,
-        media_type="application/zip",
-        headers={"Content-Disposition": f"attachment; filename=keys_{username}.zip"}
-    )
-
 @app.post("/firmar_receta/")
 async def firmar_receta(
     paciente_id: int = Form(...),
