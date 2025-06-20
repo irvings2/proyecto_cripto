@@ -298,71 +298,68 @@ from sqlalchemy.orm import Session
 
 @app.post("/login/")
 async def login(username: str, password: str, db: Session = Depends(get_db)):
-    # 1. Verificar usuario y contraseña
+    # 1. Buscamos al usuario
     user = db.query(Usuario).filter(Usuario.username == username).first()
     if not user:
         raise HTTPException(status_code=404, detail="Usuario no encontrado")
     if not pwd_context.verify(password, user.password_hash):
         raise HTTPException(status_code=401, detail="Contraseña incorrecta")
 
-    # 2. Determinar el ID de categoría según tipo_usuario
+    # 2. Determinamos el ID de su entidad según tipo_usuario
     category_id = None
     if user.tipo_usuario == "medico":
-        medico = db.query(Medico).filter(Medico.usuario_id == user.id).first()
-        if not medico:
+        registro = db.query(Medico).filter(Medico.usuario_id == user.id).first()
+        if not registro:
             raise HTTPException(status_code=404, detail="Médico no encontrado")
-        category_id = medico.id
+        category_id = registro.id
     elif user.tipo_usuario == "paciente":
-        paciente = db.query(Paciente).filter(Paciente.usuario_id == user.id).first()
-        if not paciente:
+        registro = db.query(Paciente).filter(Paciente.usuario_id == user.id).first()
+        if not registro:
             raise HTTPException(status_code=404, detail="Paciente no encontrado")
-        category_id = paciente.id
+        category_id = registro.id
     elif user.tipo_usuario == "farmaceutico":
-        farm = db.query(Farmaceutico).filter(Farmaceutico.usuario_id == user.id).first()
-        if not farm:
+        registro = db.query(Farmaceutico).filter(Farmaceutico.usuario_id == user.id).first()
+        if not registro:
             raise HTTPException(status_code=404, detail="Farmacéutico no encontrado")
-        category_id = farm.id
+        category_id = registro.id
 
-    # 3. Si ya tenía llaves generadas, devolvemos todo sin regenerar
+    # 3. Si ya tenía llaves generadas, devolvemos el ID de su tabla
     if user.llavesgeneradas:
         return {
-            "id": user.id,
+            "user_id": category_id,
             "username": user.username,
-            "tipo_usuario": user.tipo_usuario,
-            "category_id": category_id
+            "tipo_usuario": user.tipo_usuario
         }
 
-    # 4. Primer login: generamos llaves y las guardamos
+    # 4. Generación inicial de llaves
     private_key_ed, public_key_ed = generate_ed25519_keys()
     private_key_x255, public_key_x255 = generate_x25519_keys()
-
     user.public_key_ed = public_key_ed
     user.public_key_x255 = public_key_x255
     user.llavesgeneradas = True
     db.commit()
 
-    # 5. Serializar y guardar PEM en disco
-    private_pem_ed = private_key_ed.private_bytes(
+    # 5. Serializar y guardar claves privadas en temp
+    ed_pem = private_key_ed.private_bytes(
         encoding=serialization.Encoding.PEM,
         format=serialization.PrivateFormat.PKCS8,
         encryption_algorithm=serialization.NoEncryption()
     )
-    private_pem_x255 = private_key_x255.private_bytes(
+    x255_pem = private_key_x255.private_bytes(
         encoding=serialization.Encoding.PEM,
         format=serialization.PrivateFormat.PKCS8,
         encryption_algorithm=serialization.NoEncryption()
     )
     ed_path = os.path.join(TEMP_DIR, f"private_key_ed_{username}.pem")
     x255_path = os.path.join(TEMP_DIR, f"private_key_x255_{username}.pem")
-    with open(ed_path,   "wb") as f: f.write(private_pem_ed)
-    with open(x255_path, "wb") as f: f.write(private_pem_x255)
+    with open(ed_path, "wb") as f: f.write(ed_pem)
+    with open(x255_path, "wb") as f: f.write(x255_pem)
 
-    # 6. Devolver id, category_id y rutas de descarga
+    # 6. Devolvemos user_id (de su tabla), tipo y rutas de descarga
     return {
-        "id": user.id,
+        "user_id": category_id,
         "username": user.username,
         "tipo_usuario": user.tipo_usuario,
-        "category_id": category_id,
         "public_key_ed": public_key_ed,
         "public_key_x255": public_key_x255,
         "private_key_zip": f"/download/keys/{username}"
