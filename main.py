@@ -290,56 +290,83 @@ async def create_usuario(usuario: Union[MedicoCreate, PacienteCreate, Farmaceuti
     
     # Si el tipo de usuario no es reconocido
     raise HTTPException(status_code=400, detail="Tipo de usuario no válido.")
+
+
+
+from fastapi import FastAPI, Depends, HTTPException
+from sqlalchemy.orm import Session
+
 @app.post("/login/")
 async def login(username: str, password: str, db: Session = Depends(get_db)):
+    # 1. Verificar usuario y contraseña
     user = db.query(Usuario).filter(Usuario.username == username).first()
     if not user:
         raise HTTPException(status_code=404, detail="Usuario no encontrado")
     if not pwd_context.verify(password, user.password_hash):
         raise HTTPException(status_code=401, detail="Contraseña incorrecta")
 
-    # Si ya se generaron llaves, devolvemos id, username y tipo
+    # 2. Determinar el ID de categoría según tipo_usuario
+    category_id = None
+    if user.tipo_usuario == "medico":
+        medico = db.query(Medico).filter(Medico.usuario_id == user.id).first()
+        if not medico:
+            raise HTTPException(status_code=404, detail="Médico no encontrado")
+        category_id = medico.id
+    elif user.tipo_usuario == "paciente":
+        paciente = db.query(Paciente).filter(Paciente.usuario_id == user.id).first()
+        if not paciente:
+            raise HTTPException(status_code=404, detail="Paciente no encontrado")
+        category_id = paciente.id
+    elif user.tipo_usuario == "farmaceutico":
+        farm = db.query(Farmaceutico).filter(Farmaceutico.usuario_id == user.id).first()
+        if not farm:
+            raise HTTPException(status_code=404, detail="Farmacéutico no encontrado")
+        category_id = farm.id
+
+    # 3. Si ya tenía llaves generadas, devolvemos todo sin regenerar
     if user.llavesgeneradas:
         return {
             "id": user.id,
             "username": user.username,
-            "tipo_usuario": user.tipo_usuario
+            "tipo_usuario": user.tipo_usuario,
+            "category_id": category_id
         }
 
-    # Primer login: generamos llaves
+    # 4. Primer login: generamos llaves y las guardamos
     private_key_ed, public_key_ed = generate_ed25519_keys()
     private_key_x255, public_key_x255 = generate_x25519_keys()
+
     user.public_key_ed = public_key_ed
     user.public_key_x255 = public_key_x255
     user.llavesgeneradas = True
     db.commit()
 
-    # Serializamos y guardamos las privadas en temp
-    private_key_ed_pem = private_key_ed.private_bytes(
+    # 5. Serializar y guardar PEM en disco
+    private_pem_ed = private_key_ed.private_bytes(
         encoding=serialization.Encoding.PEM,
         format=serialization.PrivateFormat.PKCS8,
         encryption_algorithm=serialization.NoEncryption()
     )
-    private_key_x255_pem = private_key_x255.private_bytes(
+    private_pem_x255 = private_key_x255.private_bytes(
         encoding=serialization.Encoding.PEM,
         format=serialization.PrivateFormat.PKCS8,
         encryption_algorithm=serialization.NoEncryption()
     )
-    ed_file = os.path.join(TEMP_DIR, f"private_key_ed_{username}.pem")
-    x255_file = os.path.join(TEMP_DIR, f"private_key_x255_{username}.pem")
-    with open(ed_file, "wb") as f: f.write(private_key_ed_pem)
-    with open(x255_file, "wb") as f: f.write(private_key_x255_pem)
+    ed_path = os.path.join(TEMP_DIR, f"private_key_ed_{username}.pem")
+    x255_path = os.path.join(TEMP_DIR, f"private_key_x255_{username}.pem")
+    with open(ed_path,   "wb") as f: f.write(private_pem_ed)
+    with open(x255_path, "wb") as f: f.write(private_pem_x255)
 
-    # Devolvemos siempre id y, además, las rutas de descarga al ZIP
+    # 6. Devolver id, category_id y rutas de descarga
     return {
         "id": user.id,
         "username": user.username,
         "tipo_usuario": user.tipo_usuario,
+        "category_id": category_id,
         "public_key_ed": public_key_ed,
         "public_key_x255": public_key_x255,
         "private_key_zip": f"/download/keys/{username}"
     }
-
 
 
 
