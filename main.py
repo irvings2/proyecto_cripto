@@ -638,4 +638,49 @@ async def surtir_receta(
         "receta_id": receta.id,
         "contenido_receta": mensaje.decode()
     }
+# Listado de recetas por paciente
+@app.get("/recetas/paciente/{paciente_id}")
+async def recetas_por_paciente(paciente_id: int, db: Session = Depends(get_db)):
+    recetas = db.query(Receta).filter(Receta.paciente_id == paciente_id).all()
+    return {
+        "recetas": [
+            {
+                "id": r.id,
+                "fecha_emision": r.fecha_emision,
+                "fecha_vencimiento": r.fecha_vencimiento,
+                "estado": r.estado,
+                "medico": r.medico.nombre,
+                "firma_valida": r.firma is not None
+            } for r in recetas
+        ]
+    }
+# Endpoint para ver el contenido descrifrado de una receta
+@app.post("/recetas/ver_contenido/{receta_id}")
+async def ver_receta_paciente(
+    receta_id: int,
+    private_key_file_x255: UploadFile = File(...),
+    db: Session = Depends(get_db)
+):
+    receta = db.query(Receta).filter(Receta.id == receta_id).first()
+    if not receta:
+        raise HTTPException(status_code=404, detail="Receta no encontrada")
 
+    # Validación: solo el paciente debe poder ver esta receta
+    public_key_paciente = receta.paciente.usuario.public_key_x255
+    if not public_key_paciente:
+        raise HTTPException(status_code=404, detail="Clave pública no encontrada")
+
+    # Leer clave privada del paciente
+    private_key_x255_pem = await private_key_file_x255.read()
+
+    try:
+        aes_key = intercambiar_claves_x25519(private_key_x255_pem, public_key_paciente)
+        cipher = Cipher(algorithms.AES(aes_key), modes.GCM(bytes.fromhex(receta.nonce), bytes.fromhex(receta.tag)), backend=default_backend())
+        decryptor = cipher.decryptor()
+        mensaje = decryptor.update(bytes.fromhex(receta.receta_cifrada)) + decryptor.finalize()
+    except Exception as e:
+        raise HTTPException(status_code=400, detail="Error al descifrar la receta")
+
+    return {
+        "mensaje_descifrado": mensaje.decode()
+    }
