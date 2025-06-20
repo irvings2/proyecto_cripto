@@ -568,3 +568,74 @@ def firmar_mensaje_con_ed25519(private_key, mensaje):
     # Firma del mensaje con la clave privada Ed25519
     signature = private_key.sign(mensaje.encode())
     return signature
+
+# Endpoint para obtener las recetas de un paciente específico
+@app.get("/recetas/paciente/{paciente_id}")
+async def recetas_por_paciente(paciente_id: int, db: Session = Depends(get_db)):
+    recetas = db.query(Receta).filter(Receta.paciente_id == paciente_id).all()
+    return {"recetas": [r.id for r in recetas]}
+
+# Consulta de recetas emitidas por un médico específico
+@app.get("/recetas/medico/{medico_id}")
+async def recetas_por_medico(medico_id: int, db: Session = Depends(get_db)):
+    recetas = db.query(Receta).filter(Receta.medico_id == medico_id).all()
+    return {"recetas": [r.id for r in recetas]}
+
+# Consulta de recetas asignadas a un farmacéutico específico
+@app.get("/recetas/farmaceutico/{farmaceutico_id}")
+async def recetas_por_farmaceutico(farmaceutico_id: int, db: Session = Depends(get_db)):
+    recetas = db.query(Receta).filter(Receta.farmaceutico_id == farmaceutico_id).all()
+    return {"recetas": [r.id for r in recetas]}
+
+# Surtir una receta y actualizar su estado
+@app.post("/recetas/surtir/{receta_id}")
+async def surtir_receta(
+    receta_id: int,
+    farmaceutico_id: int = Form(...),
+    private_key_file_x255: UploadFile = File(...),
+    db: Session = Depends(get_db)
+):
+    receta = db.query(Receta).filter(Receta.id == receta_id).first()
+    if not receta:
+        raise HTTPException(status_code=404, detail="Receta no encontrada")
+    
+    if receta.estado != "emitida":
+        raise HTTPException(status_code=400, detail="La receta ya fue surtida o está cancelada")
+    
+    if receta.fecha_vencimiento < datetime.utcnow():
+        raise HTTPException(status_code=400, detail="La receta está vencida")
+
+    # Verificar farmacéutico válido
+    farmaceutico = db.query(Farmaceutico).filter(Farmaceutico.id == farmaceutico_id).first()
+    if not farmaceutico:
+        raise HTTPException(status_code=404, detail="Farmacéutico no encontrado")
+    
+    # Clave pública del paciente
+    paciente = receta.paciente
+    if not paciente.usuario.public_key_x255:
+        raise HTTPException(status_code=404, detail="Clave pública del paciente no encontrada")
+    
+    # Leer clave privada del farmacéutico
+    private_key_x255_pem = await private_key_file_x255.read()
+    
+    # Derivar clave AES y descifrar mensaje
+    try:
+        aes_key = intercambiar_claves_x25519(private_key_x255_pem, paciente.usuario.public_key_x255)
+        cipher = Cipher(algorithms.AES(aes_key), modes.GCM(bytes.fromhex(receta.nonce), bytes.fromhex(receta.tag)), backend=default_backend())
+        decryptor = cipher.decryptor()
+        mensaje = decryptor.update(bytes.fromhex(receta.receta_cifrada)) + decryptor.finalize()
+    except Exception as e:
+        raise HTTPException(status_code=400, detail="Error al descifrar la receta")
+
+    # Marcar receta como surtida
+    receta.estado = "surtida"
+    receta.fecha_surtido = datetime.utcnow()
+    receta.farmaceutico_id = farmaceutico_id
+    db.commit()
+
+    return {
+        "message": "Receta surtida con éxito",
+        "receta_id": receta.id,
+        "contenido_receta": mensaje.decode()
+    }
+
