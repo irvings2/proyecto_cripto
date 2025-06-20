@@ -708,27 +708,20 @@ async def ver_receta_paciente(
     return {
         "mensaje_descifrado": mensaje.decode()
     }
-    @app.get("/download/keys/{username}")
-    async def download_all_keys(username: str):
-        """
-        Empaqueta private_key_ed_<username>.pem y private_key_x255_<username>.pem 
-        en un ZIP y lo devuelve en una sola respuesta.
-        """
-        ed_path   = os.path.join(TEMP_DIR, f"private_key_ed_{username}.pem")
-        x255_path = os.path.join(TEMP_DIR, f"private_key_x255_{username}.pem")
-
-        if not os.path.exists(ed_path) or not os.path.exists(x255_path):
-            raise HTTPException(status_code=404, detail="Alguna de las claves no existe")
-
-        buffer = BytesIO()
-        with zipfile.ZipFile(buffer, mode="w", compression=zipfile.ZIP_DEFLATED) as zipf:
-            zipf.write(ed_path,   arcname=os.path.basename(ed_path))
-            zipf.write(x255_path, arcname=os.path.basename(x255_path))
-        buffer.seek(0)
-
-        return StreamingResponse(
-            buffer,
-            media_type="application/zip",
-            headers={"Content-Disposition": f"attachment; filename=keys_{username}.zip"}
-        )
+@app.get("/download/keys/{username}")
+async def download_all_keys(username: str):
+    ed_path = os.path.join(TEMP_DIR, f"private_key_ed_{username}.pem")
+    x_path = os.path.join(TEMP_DIR, f"private_key_x255_{username}.pem")
+    if not os.path.exists(ed_path) or not os.path.exists(x_path):
+        raise HTTPException(status_code=404, detail="Alguna de las claves no existe")
+    buffer = BytesIO()
+    with zipfile.ZipFile(buffer, mode="w", compression=zipfile.ZIP_DEFLATED) as z:
+        z.write(ed_path, arcname=os.path.basename(ed_path))
+        z.write(x_path, arcname=os.path.basename(x_path))
+    buffer.seek(0)
+    return StreamingResponse(
+        buffer,
+        media_type="application/zip",
+        headers={"Content-Disposition": f"attachment; filename=keys_{username}.zip"}
+    )
 
