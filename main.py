@@ -767,3 +767,62 @@ async def download_all_keys(username: str):
         headers={"Content-Disposition": f"attachment; filename=keys_{username}.zip"}
     )
 
+@app.get("/receta/{id}")
+async def obtener_receta(id: int, db: Session = Depends(get_db)):
+    receta = db.query(Receta).filter(Receta.id == id).first()
+    if not receta:
+        raise HTTPException(status_code=404, detail="Receta no encontrada")
+
+    return {
+        "id": receta.id,
+        "fecha_emision": receta.fecha_emision,
+        "fecha_vencimiento": receta.fecha_vencimiento,
+        "estado": receta.estado,
+        "paciente_id": receta.paciente_id,
+        "medico_id": receta.medico_id,
+        "farmaceutico_id": receta.farmaceutico_id,
+        "firma_valida": receta.firma is not None
+    }
+
+@app.get("/pacientes/")
+async def listar_pacientes(db: Session = Depends(get_db)):
+    pacientes = db.query(Paciente).all()
+    return [
+        {
+            "id": p.id,
+            "nombre": f"{p.nombre} {p.apellido_paterno}",
+            "telefono": p.telefono,
+            "clinica_id": p.clinica_id
+        }
+        for p in pacientes
+    ]
+
+@app.get("/farmaceuticos/")
+async def listar_farmaceuticos(db: Session = Depends(get_db)):
+    farmas = db.query(Farmaceutico).all()
+    return [
+        {
+            "id": f.id,
+            "nombre": f"{f.nombre} {f.apellido_paterno}",
+            "telefono": f.telefono,
+            "farmacia_id": f.farmacia_id
+        }
+        for f in farmas
+    ]
+
+@app.get("/clinicas/")
+async def listar_clinicas(db: Session = Depends(get_db)):
+    clinicas = db.query(Clinica).all()
+    return [
+        {"id": c.id, "nombre": c.nombre, "tipo": c.tipo}
+        for c in clinicas
+    ]
+
+@app.get("/farmacias/")
+async def listar_farmacias(db: Session = Depends(get_db)):
+    farmacias = db.query(Farmacia).all()
+    return [
+        {"id": f.id, "nombre": f.nombre, "direccion": f.direccion, "telefono": f.telefono}
+        for f in farmacias
+    ]
+
