@@ -729,16 +729,47 @@ async def obtener_contenido_receta(
         "contenido_receta": mensaje.decode("utf-8"),
     }
 @router.get("/receta/{receta_id}")
-async def get_receta(receta_id: int, db: Session = Depends(get_db)):
+async def surtir_receta(
+    receta_id: int,
+    farmaceutico_id: int = Form(...),
+    private_key_file_x255: UploadFile = File(...),
+    db: Session = Depends(get_db)
+):
     receta = db.query(Receta).filter(Receta.id == receta_id).first()
     if not receta:
         raise HTTPException(status_code=404, detail="Receta no encontrada")
-    # Devuelve los campos básicos requeridos
+    
+    if receta.estado != "emitida":
+        raise HTTPException(status_code=400, detail="La receta ya fue surtida o está cancelada")
+    
+    if receta.fecha_vencimiento < datetime.utcnow():
+        raise HTTPException(status_code=400, detail="La receta está vencida")
+
+    # Verificar farmacéutico válido
+    farmaceutico = db.query(Farmaceutico).filter(Farmaceutico.id == farmaceutico_id).first()
+    if not farmaceutico:
+        raise HTTPException(status_code=404, detail="Farmacéutico no encontrado")
+    
+    # Clave pública del paciente
+    paciente = receta.paciente
+    if not paciente.usuario.public_key_x255:
+        raise HTTPException(status_code=404, detail="Clave pública del paciente no encontrada")
+    
+    # Leer clave privada del farmacéutico
+    private_key_x255_pem = await private_key_file_x255.read()
+    
+    # Derivar clave AES y descifrar mensaje
+    try:
+        aes_key = intercambiar_claves_x25519(private_key_x255_pem, paciente.usuario.public_key_x255)
+        cipher = Cipher(algorithms.AES(aes_key), modes.GCM(bytes.fromhex(receta.nonce), bytes.fromhex(receta.tag)), backend=default_backend())
+        decryptor = cipher.decryptor()
+        mensaje = decryptor.update(bytes.fromhex(receta.receta_cifrada)) + decryptor.finalize()
+    except Exception as e:
+        raise HTTPException(status_code=400, detail="Error al descifrar la receta")
+
+
     return {
-        "id": receta.id,
-        "medico_id": receta.medico_id,
-        "paciente_id": receta.paciente_id,
-        "farmaceutico_id": receta.farmaceutico_id,  # Puede ser None
-        "estado": receta.estado,
-        "fecha_emision": receta.fecha_emision,
+        "message": "Receta surtida con éxito",
+        "receta_id": receta.id,
+        "contenido_receta": mensaje.decode()
     }
