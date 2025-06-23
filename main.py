@@ -766,15 +766,10 @@ async def download_all_keys(username: str):
         media_type="application/zip",
         headers={"Content-Disposition": f"attachment; filename=keys_{username}.zip"}
     )
-@app.get("/clinicas/")
-async def obtener_clinicas(db: Session = Depends(get_db)):
-    clinicas = db.query(Clinica).all()
-    return [
-        {
-            "id": clinica.id,
-            "nombre": clinica.nombre,
-            "tipo": clinica.tipo
-        }
-        for clinica in clinicas
-    ]
+@app.get("/prueba/")
+async def get_usuarios(db: Session = Depends(get_db)):
+    # Realizar el SELECT en la tabla de usuarios
+    query = select(Usuario)
+    result = db.execute(query).scalars().all()  # Obtener todos los usuarios
+    return {"usuarios": result}
 
