@@ -590,12 +590,10 @@ async def recetas_por_farmaceutico(farmaceutico_id: int, db: Session = Depends(g
     recetas = db.query(Receta).filter(Receta.farmaceutico_id == farmaceutico_id).all()
     return {"recetas": [r.id for r in recetas]}
 
-# Surtir una receta y actualizar su estado
 @app.post("/recetas/surtir/{receta_id}")
 async def surtir_receta(
     receta_id: int,
     farmaceutico_id: int = Form(...),
-    private_key_file_x255: UploadFile = File(...),
     db: Session = Depends(get_db)
 ):
     receta = db.query(Receta).filter(Receta.id == receta_id).first()
@@ -613,22 +611,18 @@ async def surtir_receta(
     if not farmaceutico:
         raise HTTPException(status_code=404, detail="Farmacéutico no encontrado")
     
-    # Clave pública del paciente
-    paciente = receta.paciente
-    if not paciente.usuario.public_key_x255:
-        raise HTTPException(status_code=404, detail="Clave pública del paciente no encontrada")
-    
-    # Leer clave privada del farmacéutico
-    private_key_x255_pem = await private_key_file_x255.read()
-    
-    # Derivar clave AES y descifrar mensaje
     try:
-        aes_key = intercambiar_claves_x25519(private_key_x255_pem, paciente.usuario.public_key_x255)
-        cipher = Cipher(algorithms.AES(aes_key), modes.GCM(bytes.fromhex(receta.nonce), bytes.fromhex(receta.tag)), backend=default_backend())
+        # Usa la clave AES almacenada (hex string)
+        aes_key = bytes.fromhex(receta.clave_aes)
+        cipher = Cipher(
+            algorithms.AES(aes_key),
+            modes.GCM(bytes.fromhex(receta.nonce), bytes.fromhex(receta.tag)),
+            backend=default_backend()
+        )
         decryptor = cipher.decryptor()
         mensaje = decryptor.update(bytes.fromhex(receta.receta_cifrada)) + decryptor.finalize()
     except Exception as e:
-        raise HTTPException(status_code=400, detail="Error al descifrar la receta")
+        raise HTTPException(status_code=400, detail="Error al descifrar la receta: " + str(e))
 
     # Marcar receta como surtida
     receta.estado = "surtida"
@@ -639,7 +633,7 @@ async def surtir_receta(
     return {
         "message": "Receta surtida con éxito",
         "receta_id": receta.id,
-        "contenido_receta": mensaje.decode()
+        "contenido_receta": mensaje.decode("utf-8")
     }
 @app.get("/usuario_info/")
 async def usuario_info(username: str = Query(...), db: Session = Depends(get_db)):
