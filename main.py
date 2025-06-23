@@ -22,6 +22,18 @@ import zipfile
 from io import BytesIO
 from fastapi.responses import StreamingResponse
 import os
+from fastapi import FastAPI, Depends, HTTPException
+from sqlalchemy.orm import Session
+
+
+from fastapi import FastAPI, Depends, HTTPException
+from sqlalchemy.orm import Session
+from passlib.context import CryptContext
+import os, serialization
+
+from .database import get_db
+from .models import Usuario, Medico, Paciente, Farmaceutico
+from .security import generate_ed25519_keys, generate_x25519_keys, TEMP_DIR
 
 DATABASE_URL = "postgresql://postgres.gijqjegotyhtdbngcuth:nedtu3-ruqvec-mixSew@aws-0-us-east-2.pooler.supabase.com:6543/postgres"
 
@@ -301,20 +313,6 @@ async def create_usuario(usuario: Union[MedicoCreate, PacienteCreate, Farmaceuti
     # Si el tipo de usuario no es reconocido
     raise HTTPException(status_code=400, detail="Tipo de usuario no válido.")
 
-
-
-from fastapi import FastAPI, Depends, HTTPException
-from sqlalchemy.orm import Session
-
-
-from fastapi import FastAPI, Depends, HTTPException
-from sqlalchemy.orm import Session
-from passlib.context import CryptContext
-import os, serialization
-
-from .database import get_db
-from .models import Usuario, Medico, Paciente, Farmaceutico
-from .security import generate_ed25519_keys, generate_x25519_keys, TEMP_DIR
 
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 app = FastAPI()
