@@ -638,4 +638,7 @@ async def surtir_receta(
         "receta_id": receta.id,
         "contenido_receta": mensaje.decode()
     }
+@app.get("/prueba_api_actualizacion/")
+async def prueba_api_actualizacion():
+    return {"ok": True, "mensaje": "¡FastAPI actualizado y funcionando! 🚀"}
 
