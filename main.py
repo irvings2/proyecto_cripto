@@ -728,4 +728,17 @@ async def obtener_contenido_receta(
         "receta_id": receta.id,
         "contenido_receta": mensaje.decode("utf-8"),
     }
-
+@router.get("/receta/{receta_id}")
+async def get_receta(receta_id: int, db: Session = Depends(get_db)):
+    receta = db.query(Receta).filter(Receta.id == receta_id).first()
+    if not receta:
+        raise HTTPException(status_code=404, detail="Receta no encontrada")
+    # Devuelve los campos básicos requeridos
+    return {
+        "id": receta.id,
+        "medico_id": receta.medico_id,
+        "paciente_id": receta.paciente_id,
+        "farmaceutico_id": receta.farmaceutico_id,  # Puede ser None
+        "estado": receta.estado,
+        "fecha_emision": receta.fecha_emision,
+    }
