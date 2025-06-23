@@ -688,44 +688,44 @@ async def obtener_contenido_receta(
     receta_id: int,
     usuario_id: int = Form(...),
     tipo_usuario: str = Form(...),  # "paciente", "medico", "farmaceutico"
-    private_key_file_x255: UploadFile = File(...),
+    private_key_file_x255: UploadFile = File(...),  # Se sigue pidiendo aunque no se use, para simular el flujo real
     db: Session = Depends(get_db)
 ):
     receta = db.query(Receta).filter(Receta.id == receta_id).first()
     if not receta:
         raise HTTPException(status_code=404, detail="Receta no encontrada")
 
-    # Verifica que el usuario tenga acceso
+    # Control de acceso por rol
     if tipo_usuario == "paciente":
         if receta.paciente_id != usuario_id:
             raise HTTPException(status_code=403, detail="Acceso denegado")
-        usuario = db.query(Paciente).filter(Paciente.id == usuario_id).first()
-        public_key_x255 = receta.medico.usuario.public_key_x255  # Médico generó la receta
     elif tipo_usuario == "medico":
         if receta.medico_id != usuario_id:
             raise HTTPException(status_code=403, detail="Acceso denegado")
-        usuario = db.query(Medico).filter(Medico.id == usuario_id).first()
-        public_key_x255 = receta.paciente.usuario.public_key_x255  # Paciente recibe la receta
     elif tipo_usuario == "farmaceutico":
         if receta.farmaceutico_id != usuario_id:
             raise HTTPException(status_code=403, detail="Acceso denegado")
-        usuario = db.query(Farmaceutico).filter(Farmaceutico.id == usuario_id).first()
-        public_key_x255 = receta.paciente.usuario.public_key_x255  # Farmacéutico descifra con clave del paciente
     else:
         raise HTTPException(status_code=400, detail="Tipo de usuario inválido")
 
-    # Leer la clave privada
-    private_key_x255_pem = await private_key_file_x255.read()
+    # Leer la clave privada solo para mantener el flujo (no es usada aquí)
+    _ = await private_key_file_x255.read()
+
     try:
-        # El AES key está guardado en la tabla (hex). Usar directamente para descifrar.
+        # Descifrar usando la clave AES almacenada (ya está en hex string)
         aes_key = bytes.fromhex(receta.clave_aes)
-        cipher = Cipher(algorithms.AES(aes_key), modes.GCM(bytes.fromhex(receta.nonce), bytes.fromhex(receta.tag)), backend=default_backend())
+        cipher = Cipher(
+            algorithms.AES(aes_key),
+            modes.GCM(bytes.fromhex(receta.nonce), bytes.fromhex(receta.tag)),
+            backend=default_backend(),
+        )
         decryptor = cipher.decryptor()
         mensaje = decryptor.update(bytes.fromhex(receta.receta_cifrada)) + decryptor.finalize()
     except Exception as e:
-        raise HTTPException(status_code=400, detail="Error al descifrar el contenido: " + str(e))
+        raise HTTPException(status_code=400, detail=f"Error al descifrar el contenido: {e}")
 
     return {
         "receta_id": receta.id,
-        "contenido_receta": mensaje.decode("utf-8")
+        "contenido_receta": mensaje.decode("utf-8"),
     }
+
