@@ -140,34 +140,6 @@ class Receta(Base):
     medico = relationship("Medico", back_populates="receta")
     farmaceutico = relationship("Farmaceutico", back_populates="receta")
 
-class PacienteNuevo(Base):
-    username: str
-    password: str
-    nombre: str
-    apellido_paterno: str
-    apellido_materno: str
-    telefono: str
-    clinica_id: int
-
-class MedicoNuevo(Base):
-    username: str
-    password: str
-    nombre: str
-    apellido_paterno: str
-    apellido_materno: str
-    especialidad: str
-    telefono: str
-    clinica_id: int
-
-class FarmaceuticoNuevo(Base):
-    username: str
-    password: str
-    nombre: str
-    apellido_paterno: str
-    apellido_materno: str
-    telefono: str
-    farmacia_id: int
-
 app = FastAPI()
 
 app.add_middleware(
