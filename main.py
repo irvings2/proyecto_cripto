@@ -688,27 +688,11 @@ async def obtener_contenido_receta(
     receta_id: int,
     usuario_id: int = Form(...),
     tipo_usuario: str = Form(...),  # "paciente", "medico", "farmaceutico"
-    private_key_file_x255: UploadFile = File(...),  # Se sigue pidiendo aunque no se use, para simular el flujo real
     db: Session = Depends(get_db)
 ):
     receta = db.query(Receta).filter(Receta.id == receta_id).first()
     if not receta:
         raise HTTPException(status_code=404, detail="Receta no encontrada")
-
-    # Control de acceso por rol
-    if tipo_usuario == "paciente":
-        if receta.paciente_id != usuario_id:
-            raise HTTPException(status_code=403, detail="Acceso denegado")
-    elif tipo_usuario == "medico":
-        if receta.medico_id != usuario_id:
-            raise HTTPException(status_code=403, detail="Acceso denegado")
-    elif tipo_usuario == "farmaceutico":
-        if receta.farmaceutico_id != usuario_id:
-            raise HTTPException(status_code=403, detail="Acceso denegado")
-    else:
-        raise HTTPException(status_code=400, detail="Tipo de usuario inválido")
-
-
     try:
         # Descifrar usando la clave AES almacenada (ya está en hex string)
         aes_key = bytes.fromhex(receta.clave_aes)
