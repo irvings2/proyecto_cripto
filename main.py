@@ -210,63 +210,70 @@ async def get_usuarios(db: Session = Depends(get_db)):
 
 @app.post("/usuarios/")
 async def create_usuario(usuario: Union[MedicoCreate, PacienteCreate, FarmaceuticoCreate], db: Session = Depends(get_db)):
-    # Validar si el username ya existe
+    # Verificar si el username ya existe
     existing_user = db.query(Usuario).filter(Usuario.username == usuario.username).first()
     if existing_user:
         raise HTTPException(status_code=400, detail="El nombre de usuario ya está registrado.")
 
-    # Validar tipo_usuario válido
-    if usuario.tipo_usuario not in ['medico', 'paciente', 'farmaceutico']:
-        raise HTTPException(status_code=400, detail="Tipo de usuario no válido.")
-
-    # Validaciones por tipo
-    if usuario.tipo_usuario in ['medico', 'paciente']:
-        clinica = db.query(Clinica).filter(Clinica.id == usuario.clinica_id).first()
-        if not clinica:
-            raise HTTPException(status_code=400, detail="La clínica no existe.")
-
-    if usuario.tipo_usuario == 'farmaceutico':
-        farmacia = db.query(Farmacia).filter(Farmacia.id == usuario.farmacia_id).first()
-        if not farmacia:
-            raise HTTPException(status_code=400, detail="La farmacia no existe.")
-
-    # Crear usuario base
-    hashed_password = hash_password(usuario.password)
+    # Crear una nueva instancia de Usuario y agregarla a la base de datos
+    hashed_password = hash_password(usuario.password)  # Generar el hash de la contraseña
     new_user = Usuario(
         username=usuario.username,
         password_hash=hashed_password,
         tipo_usuario=usuario.tipo_usuario
     )
+
     db.add(new_user)
-    db.commit()
-    db.refresh(new_user)
+    db.commit()  # Guardar el usuario en la tabla de usuarios
+    db.refresh(new_user)  # Obtener el id generado
 
-    # Insertar en la tabla correspondiente
+    if usuario.tipo_usuario in ['medico', 'paciente']:
+        clinica = db.query(Clinica).filter(Clinica.id == usuario.clinica_id).first()
+        if not clinica:
+            raise HTTPException(status_code=400, detail="La clínica no existe.")
+    
+    if usuario.tipo_usuario == 'farmaceutico':
+        farmacia = db.query(Farmacia).filter(Farmacia.id == usuario.farmacia_id).first()
+        if not farmacia:
+            raise HTTPException(status_code=400, detail="La farmacia no existe.")
+
+    # Dependiendo del tipo de usuario, crear la entrada en la tabla correspondiente
     if usuario.tipo_usuario == 'medico':
-        nuevo = Medico(
+        medico = Medico(
             usuario_id=new_user.id,
             nombre=usuario.nombre,
             apellido_paterno=usuario.apellido_paterno,
             apellido_materno=usuario.apellido_materno,
-            especialidad=usuario.especialidad,
+            especialidad=usuario.especialidad,  # Recibido desde el frontend
             telefono=usuario.telefono,
-            clinica_id=usuario.clinica_id
+            clinica_id=usuario.clinica_id  # Asignar clínica al médico
         )
-        db.add(nuevo)
+        db.add(medico)
+        db.commit()
 
-    elif usuario.tipo_usuario == 'paciente':
-        nuevo = Paciente(
+        # Devolvemos la respuesta con los datos del médico
+        return {"id": new_user.id, "username": new_user.username, "tipo_usuario": new_user.tipo_usuario, 
+                "nombre": medico.nombre, "apellido_paterno": medico.apellido_paterno, "especialidad": medico.especialidad, 
+                "clinica": clinica.nombre}
+        
+    if usuario.tipo_usuario == 'paciente':
+        paciente = Paciente(
             usuario_id=new_user.id,
             nombre=usuario.nombre,
             apellido_paterno=usuario.apellido_paterno,
             apellido_materno=usuario.apellido_materno,
             telefono=usuario.telefono,
-            clinica_id=usuario.clinica_id
+            clinica_id=usuario.clinica_id  # Asignar clínica al médico
         )
-        db.add(nuevo)
+        db.add(paciente)
+        db.commit()
 
-    elif usuario.tipo_usuario == 'farmaceutico':
-        nuevo = Farmaceutico(
+        # Devolvemos la respuesta con los datos del médico
+        return {"id": new_user.id, "username": new_user.username, "tipo_usuario": new_user.tipo_usuario, 
+                "nombre": paciente.nombre, "apellido_paterno": paciente.apellido_paterno, "clinica": clinica.nombre}
+        
+    if usuario.tipo_usuario == 'farmaceutico':
+        farmaceutico = Farmaceutico(
             usuario_id=new_user.id,
             nombre=usuario.nombre,
             apellido_paterno=usuario.apellido_paterno,
@@ -274,18 +281,15 @@ async def create_usuario(usuario: Union[MedicoCreate, PacienteCreate, Farmaceuti
             telefono=usuario.telefono,
             farmacia_id=usuario.farmacia_id
         )
-        db.add(nuevo)
+        db.add(farmaceutico)
+        db.commit()
 
-    db.commit()
-    db.refresh(nuevo)
-
-    return {
-        "usuario_id": new_user.id,
-        "rol_id": nuevo.id,
-        "username": new_user.username,
-        "tipo_usuario": new_user.tipo_usuario
-    }
-
+        # Devolvemos la respuesta con los datos del médico
+        return {"id": new_user.id, "username": new_user.username, "tipo_usuario": new_user.tipo_usuario, 
+                "nombre": farmaceutico.nombre, "apellido_paterno": farmaceutico.apellido_paterno, "farmacia": farmaceutico.farmacia}
+    
+    # Si el tipo de usuario no es reconocido
+    raise HTTPException(status_code=400, detail="Tipo de usuario no válido.")
 
 
 
@@ -762,63 +766,4 @@ async def download_all_keys(username: str):
         media_type="application/zip",
         headers={"Content-Disposition": f"attachment; filename=keys_{username}.zip"}
     )
-
-@app.get("/receta/{id}")
-async def obtener_receta(id: int, db: Session = Depends(get_db)):
-    receta = db.query(Receta).filter(Receta.id == id).first()
-    if not receta:
-        raise HTTPException(status_code=404, detail="Receta no encontrada")
-
-    return {
-        "id": receta.id,
-        "fecha_emision": receta.fecha_emision,
-        "fecha_vencimiento": receta.fecha_vencimiento,
-        "estado": receta.estado,
-        "paciente_id": receta.paciente_id,
-        "medico_id": receta.medico_id,
-        "farmaceutico_id": receta.farmaceutico_id,
-        "firma_valida": receta.firma is not None
-    }
-
-@app.get("/pacientes/")
-async def listar_pacientes(db: Session = Depends(get_db)):
-    pacientes = db.query(Paciente).all()
-    return [
-        {
-            "id": p.id,
-            "nombre": f"{p.nombre} {p.apellido_paterno}",
-            "telefono": p.telefono,
-            "clinica_id": p.clinica_id
-        }
-        for p in pacientes
-    ]
-
-@app.get("/farmaceuticos/")
-async def listar_farmaceuticos(db: Session = Depends(get_db)):
-    farmas = db.query(Farmaceutico).all()
-    return [
-        {
-            "id": f.id,
-            "nombre": f"{f.nombre} {f.apellido_paterno}",
-            "telefono": f.telefono,
-            "farmacia_id": f.farmacia_id
-        }
-        for f in farmas
-    ]
-
-@app.get("/clinicas/")
-async def listar_clinicas(db: Session = Depends(get_db)):
-    clinicas = db.query(Clinica).all()
-    return [
-        {"id": c.id, "nombre": c.nombre, "tipo": c.tipo}
-        for c in clinicas
-    ]
-
-@app.get("/farmacias/")
-async def listar_farmacias(db: Session = Depends(get_db)):
-    farmacias = db.query(Farmacia).all()
-    return [
-        {"id": f.id, "nombre": f.nombre, "direccion": f.direccion, "telefono": f.telefono}
-        for f in farmacias
-    ]
 
