@@ -615,3 +615,164 @@ async def recetas_por_farmaceutico(farmaceutico_id: int, db: Session = Depends(g
     recetas = db.query(Receta).filter(Receta.farmaceutico_id == farmaceutico_id).all()
     return {"recetas": [r.id for r in recetas]}
 
+# Surtir una receta y actualizar su estado
+@app.post("/recetas/surtir/{receta_id}")
+async def surtir_receta(
+    receta_id: int,
+    farmaceutico_id: int = Form(...),
+    private_key_file_x255: UploadFile = File(...),
+    db: Session = Depends(get_db)
+):
+    receta = db.query(Receta).filter(Receta.id == receta_id).first()
+    if not receta:
+        raise HTTPException(status_code=404, detail="Receta no encontrada")
+    
+    if receta.estado != "emitida":
+        raise HTTPException(status_code=400, detail="La receta ya fue surtida o está cancelada")
+    
+    if receta.fecha_vencimiento < datetime.utcnow():
+        raise HTTPException(status_code=400, detail="La receta está vencida")
+
+    # Verificar farmacéutico válido
+    farmaceutico = db.query(Farmaceutico).filter(Farmaceutico.id == farmaceutico_id).first()
+    if not farmaceutico:
+        raise HTTPException(status_code=404, detail="Farmacéutico no encontrado")
+    
+    # Clave pública del paciente
+    paciente = receta.paciente
+    if not paciente.usuario.public_key_x255:
+        raise HTTPException(status_code=404, detail="Clave pública del paciente no encontrada")
+    
+    # Leer clave privada del farmacéutico
+    private_key_x255_pem = await private_key_file_x255.read()
+    
+    # Derivar clave AES y descifrar mensaje
+    try:
+        aes_key = intercambiar_claves_x25519(private_key_x255_pem, paciente.usuario.public_key_x255)
+        cipher = Cipher(algorithms.AES(aes_key), modes.GCM(bytes.fromhex(receta.nonce), bytes.fromhex(receta.tag)), backend=default_backend())
+        decryptor = cipher.decryptor()
+        mensaje = decryptor.update(bytes.fromhex(receta.receta_cifrada)) + decryptor.finalize()
+    except Exception as e:
+        raise HTTPException(status_code=400, detail="Error al descifrar la receta")
+
+    # Marcar receta como surtida
+    receta.estado = "surtida"
+    receta.fecha_surtido = datetime.utcnow()
+    receta.farmaceutico_id = farmaceutico_id
+    db.commit()
+
+    return {
+        "message": "Receta surtida con éxito",
+        "receta_id": receta.id,
+        "contenido_receta": mensaje.decode()
+    }
+
+@app.post("/registrar_paciente/")
+async def registrar_paciente(datos: PacienteNuevo, db: Session = Depends(get_db)):
+    # Verifica si el username ya existe
+    existing_user = db.query(Usuario).filter(Usuario.username == datos.username).first()
+    if existing_user:
+        raise HTTPException(status_code=400, detail="El nombre de usuario ya está registrado.")
+    # Verifica que la clínica exista
+    clinica = db.query(Clinica).filter(Clinica.id == datos.clinica_id).first()
+    if not clinica:
+        raise HTTPException(status_code=400, detail="La clínica no existe.")
+    # Crea el usuario
+    hashed_password = hash_password(datos.password)
+    nuevo_usuario = Usuario(
+        username=datos.username,
+        password_hash=hashed_password,
+        tipo_usuario="paciente"
+    )
+    db.add(nuevo_usuario)
+    db.commit()
+    db.refresh(nuevo_usuario)
+    # Crea el paciente
+    nuevo_paciente = Paciente(
+        usuario_id=nuevo_usuario.id,
+        nombre=datos.nombre,
+        apellido_paterno=datos.apellido_paterno,
+        apellido_materno=datos.apellido_materno,
+        telefono=datos.telefono,
+        clinica_id=datos.clinica_id
+    )
+    db.add(nuevo_paciente)
+    db.commit()
+    db.refresh(nuevo_paciente)
+    return {
+        "usuario_id": nuevo_usuario.id,
+        "paciente_id": nuevo_paciente.id,
+        "username": nuevo_usuario.username,
+        "nombre": nuevo_paciente.nombre
+    }
+
+@app.post("/registrar_medico/")
+async def registrar_medico(datos: MedicoNuevo, db: Session = Depends(get_db)):
+    existing_user = db.query(Usuario).filter(Usuario.username == datos.username).first()
+    if existing_user:
+        raise HTTPException(status_code=400, detail="El nombre de usuario ya está registrado.")
+    clinica = db.query(Clinica).filter(Clinica.id == datos.clinica_id).first()
+    if not clinica:
+        raise HTTPException(status_code=400, detail="La clínica no existe.")
+    hashed_password = hash_password(datos.password)
+    nuevo_usuario = Usuario(
+        username=datos.username,
+        password_hash=hashed_password,
+        tipo_usuario="medico"
+    )
+    db.add(nuevo_usuario)
+    db.commit()
+    db.refresh(nuevo_usuario)
+    nuevo_medico = Medico(
+        usuario_id=nuevo_usuario.id,
+        nombre=datos.nombre,
+        apellido_paterno=datos.apellido_paterno,
+        apellido_materno=datos.apellido_materno,
+        especialidad=datos.especialidad,
+        telefono=datos.telefono,
+        clinica_id=datos.clinica_id
+    )
+    db.add(nuevo_medico)
+    db.commit()
+    db.refresh(nuevo_medico)
+    return {
+        "usuario_id": nuevo_usuario.id,
+        "medico_id": nuevo_medico.id,
+        "username": nuevo_usuario.username,
+        "nombre": nuevo_medico.nombre
+    }
+
+@app.post("/registrar_farmaceutico/")
+async def registrar_farmaceutico(datos: FarmaceuticoNuevo, db: Session = Depends(get_db)):
+    existing_user = db.query(Usuario).filter(Usuario.username == datos.username).first()
+    if existing_user:
+        raise HTTPException(status_code=400, detail="El nombre de usuario ya está registrado.")
+    farmacia = db.query(Farmacia).filter(Farmacia.id == datos.farmacia_id).first()
+    if not farmacia:
+        raise HTTPException(status_code=400, detail="La farmacia no existe.")
+    hashed_password = hash_password(datos.password)
+    nuevo_usuario = Usuario(
+        username=datos.username,
+        password_hash=hashed_password,
+        tipo_usuario="farmaceutico"
+    )
+    db.add(nuevo_usuario)
+    db.commit()
+    db.refresh(nuevo_usuario)
+    nuevo_farmaceutico = Farmaceutico(
+        usuario_id=nuevo_usuario.id,
+        nombre=datos.nombre,
+        apellido_paterno=datos.apellido_paterno,
+        apellido_materno=datos.apellido_materno,
+        telefono=datos.telefono,
+        farmacia_id=datos.farmacia_id
+    )
+    db.add(nuevo_farmaceutico)
+    db.commit()
+    db.refresh(nuevo_farmaceutico)
+    return {
+        "usuario_id": nuevo_usuario.id,
+        "farmaceutico_id": nuevo_farmaceutico.id,
+        "username": nuevo_usuario.username,
+        "nombre": nuevo_farmaceutico.nombre
+    }
