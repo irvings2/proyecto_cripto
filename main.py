@@ -708,8 +708,6 @@ async def obtener_contenido_receta(
     else:
         raise HTTPException(status_code=400, detail="Tipo de usuario inválido")
 
-    # Leer la clave privada solo para mantener el flujo (no es usada aquí)
-    _ = await private_key_file_x255.read()
 
     try:
         # Descifrar usando la clave AES almacenada (ya está en hex string)
@@ -727,49 +725,4 @@ async def obtener_contenido_receta(
     return {
         "receta_id": receta.id,
         "contenido_receta": mensaje.decode("utf-8"),
-    }
-@router.get("/receta/{receta_id}")
-async def surtir_receta(
-    receta_id: int,
-    farmaceutico_id: int = Form(...),
-    private_key_file_x255: UploadFile = File(...),
-    db: Session = Depends(get_db)
-):
-    receta = db.query(Receta).filter(Receta.id == receta_id).first()
-    if not receta:
-        raise HTTPException(status_code=404, detail="Receta no encontrada")
-    
-    if receta.estado != "emitida":
-        raise HTTPException(status_code=400, detail="La receta ya fue surtida o está cancelada")
-    
-    if receta.fecha_vencimiento < datetime.utcnow():
-        raise HTTPException(status_code=400, detail="La receta está vencida")
-
-    # Verificar farmacéutico válido
-    farmaceutico = db.query(Farmaceutico).filter(Farmaceutico.id == farmaceutico_id).first()
-    if not farmaceutico:
-        raise HTTPException(status_code=404, detail="Farmacéutico no encontrado")
-    
-    # Clave pública del paciente
-    paciente = receta.paciente
-    if not paciente.usuario.public_key_x255:
-        raise HTTPException(status_code=404, detail="Clave pública del paciente no encontrada")
-    
-    # Leer clave privada del farmacéutico
-    private_key_x255_pem = await private_key_file_x255.read()
-    
-    # Derivar clave AES y descifrar mensaje
-    try:
-        aes_key = intercambiar_claves_x25519(private_key_x255_pem, paciente.usuario.public_key_x255)
-        cipher = Cipher(algorithms.AES(aes_key), modes.GCM(bytes.fromhex(receta.nonce), bytes.fromhex(receta.tag)), backend=default_backend())
-        decryptor = cipher.decryptor()
-        mensaje = decryptor.update(bytes.fromhex(receta.receta_cifrada)) + decryptor.finalize()
-    except Exception as e:
-        raise HTTPException(status_code=400, detail="Error al descifrar la receta")
-
-
-    return {
-        "message": "Receta surtida con éxito",
-        "receta_id": receta.id,
-        "contenido_receta": mensaje.decode()
     }
