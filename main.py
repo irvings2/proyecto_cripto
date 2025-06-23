@@ -18,6 +18,7 @@ from fastapi.responses import FileResponse
 from typing import Union, Optional
 from datetime import datetime
 from tempfile import NamedTemporaryFile
+from fastapi import Query
 import os
 
 DATABASE_URL = "postgresql://postgres.gijqjegotyhtdbngcuth:nedtu3-ruqvec-mixSew@aws-0-us-east-2.pooler.supabase.com:6543/postgres"
@@ -640,3 +641,43 @@ async def surtir_receta(
         "receta_id": receta.id,
         "contenido_receta": mensaje.decode()
     }
+@app.get("/usuario_info/")
+async def usuario_info(username: str = Query(...), db: Session = Depends(get_db)):
+    user = db.query(Usuario).filter(Usuario.username == username).first()
+    if not user:
+        raise HTTPException(status_code=404, detail="Usuario no encontrado")
+
+    if user.tipo_usuario == "paciente":
+        paciente = db.query(Paciente).filter(Paciente.usuario_id == user.id).first()
+        paciente_id = paciente.id if paciente else None
+        return {
+            "id_usuario": user.id,
+            "id_tipo": paciente_id,
+            "tipo_usuario": user.tipo_usuario,
+            "username": user.username,
+        }
+    elif user.tipo_usuario == "medico":
+        medico = db.query(Medico).filter(Medico.usuario_id == user.id).first()
+        medico_id = medico.id if medico else None
+        return {
+            "id_usuario": user.id,
+            "id_tipo": medico_id,
+            "tipo_usuario": user.tipo_usuario,
+            "username": user.username,
+        }
+    elif user.tipo_usuario == "farmaceutico":
+        farmaceutico = db.query(Farmaceutico).filter(Farmaceutico.usuario_id == user.id).first()
+        farmaceutico_id = farmaceutico.id if farmaceutico else None
+        return {
+            "id_usuario": user.id,
+            "id_tipo": farmaceutico_id,
+            "tipo_usuario": user.tipo_usuario,
+            "username": user.username,
+        }
+    else:
+        return {
+            "id_usuario": user.id,
+            "id_tipo": None,
+            "tipo_usuario": user.tipo_usuario,
+            "username": user.username,
+        }
