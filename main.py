@@ -206,15 +206,6 @@ class FarmaceuticoCreate(UsuarioCreate):
     farmacia_id: int  # Relación con la clínica
     clinica_id: Optional[int] = None
 
-class FarmaceuticoNuevo(BaseModel):
-    username: str
-    password: str
-    nombre: str
-    apellido_paterno: str
-    apellido_materno: str
-    telefono: str
-    farmacia_id: int
-
 
 # Configuración de passlib para el hash de la contraseña
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
@@ -774,48 +765,3 @@ async def download_all_keys(username: str):
         media_type="application/zip",
         headers={"Content-Disposition": f"attachment; filename=keys_{username}.zip"}
     )
-
-# Generar farmacéutico
-@app.post("/generar_farmaceutico/")
-async def generar_farmaceutico(datos: FarmaceuticoNuevo, db: Session = Depends(get_db)):
-    # 1. Verifica si el username ya existe
-    existing_user = db.query(Usuario).filter(Usuario.username == datos.username).first()
-    if existing_user:
-        raise HTTPException(status_code=400, detail="El nombre de usuario ya está registrado.")
-
-    # 2. Verifica que la farmacia exista
-    farmacia = db.query(Farmacia).filter(Farmacia.id == datos.farmacia_id).first()
-    if not farmacia:
-        raise HTTPException(status_code=400, detail="La farmacia no existe.")
-
-    # 3. Crea el usuario
-    hashed_password = hash_password(datos.password)
-    nuevo_usuario = Usuario(
-        username=datos.username,
-        password_hash=hashed_password,
-        tipo_usuario="farmaceutico"
-    )
-    db.add(nuevo_usuario)
-    db.commit()
-    db.refresh(nuevo_usuario)
-
-    # 4. Crea el farmacéutico
-    nuevo_farmaceutico = Farmaceutico(
-        usuario_id=nuevo_usuario.id,
-        nombre=datos.nombre,
-        apellido_paterno=datos.apellido_paterno,
-        apellido_materno=datos.apellido_materno,
-        telefono=datos.telefono,
-        farmacia_id=datos.farmacia_id
-    )
-    db.add(nuevo_farmaceutico)
-    db.commit()
-    db.refresh(nuevo_farmaceutico)
-
-    return {
-        "usuario_id": nuevo_usuario.id,
-        "farmaceutico_id": nuevo_farmaceutico.id,
-        "username": nuevo_usuario.username,
-        "nombre": nuevo_farmaceutico.nombre,
-        "farmacia_id": nuevo_farmaceutico.farmacia_id
-    }
