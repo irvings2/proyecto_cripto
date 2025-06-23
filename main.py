@@ -291,6 +291,129 @@ async def create_usuario(usuario: Union[MedicoCreate, PacienteCreate, Farmaceuti
     # Si el tipo de usuario no es reconocido
     raise HTTPException(status_code=400, detail="Tipo de usuario no válido.")
 
+# crear medico
+@app.post("/usuarios/medico/")
+async def create_medico(usuario: MedicoCreate, db: Session = Depends(get_db)):
+    existing_user = db.query(Usuario).filter(Usuario.username == usuario.username).first()
+    if existing_user:
+        raise HTTPException(status_code=400, detail="El nombre de usuario ya está registrado.")
+
+    hashed_password = hash_password(usuario.password)
+    new_user = Usuario(
+        username=usuario.username,
+        password_hash=hashed_password,
+        tipo_usuario='medico'
+    )
+    db.add(new_user)
+    db.commit()
+    db.refresh(new_user)
+
+    clinica = db.query(Clinica).filter(Clinica.id == usuario.clinica_id).first()
+    if not clinica:
+        raise HTTPException(status_code=400, detail="La clínica no existe.")
+
+    medico = Medico(
+        usuario_id=new_user.id,
+        nombre=usuario.nombre,
+        apellido_paterno=usuario.apellido_paterno,
+        apellido_materno=usuario.apellido_materno,
+        especialidad=usuario.especialidad,
+        telefono=usuario.telefono,
+        clinica_id=usuario.clinica_id
+    )
+    db.add(medico)
+    db.commit()
+
+    return {
+        "id": new_user.id,
+        "username": new_user.username,
+        "tipo_usuario": new_user.tipo_usuario,
+        "nombre": medico.nombre,
+        "apellido_paterno": medico.apellido_paterno,
+        "especialidad": medico.especialidad,
+        "clinica": clinica.nombre
+    }
+# crear paciente
+@app.post("/usuarios/paciente/")
+async def create_paciente(usuario: PacienteCreate, db: Session = Depends(get_db)):
+    existing_user = db.query(Usuario).filter(Usuario.username == usuario.username).first()
+    if existing_user:
+        raise HTTPException(status_code=400, detail="El nombre de usuario ya está registrado.")
+
+    hashed_password = hash_password(usuario.password)
+    new_user = Usuario(
+        username=usuario.username,
+        password_hash=hashed_password,
+        tipo_usuario='paciente'
+    )
+    db.add(new_user)
+    db.commit()
+    db.refresh(new_user)
+
+    clinica = db.query(Clinica).filter(Clinica.id == usuario.clinica_id).first()
+    if not clinica:
+        raise HTTPException(status_code=400, detail="La clínica no existe.")
+
+    paciente = Paciente(
+        usuario_id=new_user.id,
+        nombre=usuario.nombre,
+        apellido_paterno=usuario.apellido_paterno,
+        apellido_materno=usuario.apellido_materno,
+        telefono=usuario.telefono,
+        clinica_id=usuario.clinica_id
+    )
+    db.add(paciente)
+    db.commit()
+
+    return {
+        "id": new_user.id,
+        "username": new_user.username,
+        "tipo_usuario": new_user.tipo_usuario,
+        "nombre": paciente.nombre,
+        "apellido_paterno": paciente.apellido_paterno,
+        "clinica": clinica.nombre
+    }
+# crear farmaceutico
+@app.post("/usuarios/farmaceutico/")
+async def create_farmaceutico(usuario: FarmaceuticoCreate, db: Session = Depends(get_db)):
+    existing_user = db.query(Usuario).filter(Usuario.username == usuario.username).first()
+    if existing_user:
+        raise HTTPException(status_code=400, detail="El nombre de usuario ya está registrado.")
+
+    hashed_password = hash_password(usuario.password)
+    new_user = Usuario(
+        username=usuario.username,
+        password_hash=hashed_password,
+        tipo_usuario='farmaceutico'
+    )
+    db.add(new_user)
+    db.commit()
+    db.refresh(new_user)
+
+    farmacia = db.query(Farmacia).filter(Farmacia.id == usuario.farmacia_id).first()
+    if not farmacia:
+        raise HTTPException(status_code=400, detail="La farmacia no existe.")
+
+    farmaceutico = Farmaceutico(
+        usuario_id=new_user.id,
+        nombre=usuario.nombre,
+        apellido_paterno=usuario.apellido_paterno,
+        apellido_materno=usuario.apellido_materno,
+        telefono=usuario.telefono,
+        farmacia_id=usuario.farmacia_id
+    )
+    db.add(farmaceutico)
+    db.commit()
+
+    return {
+        "id": new_user.id,
+        "username": new_user.username,
+        "tipo_usuario": new_user.tipo_usuario,
+        "nombre": farmaceutico.nombre,
+        "apellido_paterno": farmaceutico.apellido_paterno,
+        "farmacia_id": farmacia.id,
+        "farmacia": farmacia.nombre
+    }
 
 
 from fastapi import FastAPI, Depends, HTTPException
