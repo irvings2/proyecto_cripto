@@ -76,7 +76,7 @@ class Paciente(Base):
     apellido_paterno = Column(String)
     apellido_materno = Column(String)
     telefono = Column(String)
-    clinica_id = Column(Integer, ForeignKey('clinica.id'))
+    clinica_id = Column(Integer, ForeignKey('clinica.id'), nullable=True)
 
     usuario = relationship("Usuario", back_populates="paciente")
     clinica = relationship("Clinica", back_populates="paciente")
@@ -209,7 +209,7 @@ class PacienteCreate(UsuarioCreate):
     apellido_paterno: str
     apellido_materno: str
     telefono: str
-    clinica_id: int  # Relación con la clínica
+    clinica_id: Optional[int] = None  # Relación con la clínica, opcional para pacientes
     
 class FarmaceuticoCreate(UsuarioCreate):
     nombre: str
@@ -253,9 +253,11 @@ async def create_usuario(usuario: Union[MedicoCreate, PacienteCreate, Farmaceuti
     db.refresh(new_user)  # Obtener el id generado
 
     if usuario.tipo_usuario in ['medico', 'paciente']:
-        clinica = db.query(Clinica).filter(Clinica.id == usuario.clinica_id).first()
-        if not clinica:
-            raise HTTPException(status_code=400, detail="La clínica no existe.")
+        if usuario.clinica_id is not None:
+            clinica = db.query(Clinica).filter(Clinica.id == usuario.clinica_id).first()
+            if not clinica:
+                raise HTTPException(status_code=400, detail="La clínica no existe.")
+
     
     if usuario.tipo_usuario == 'farmaceutico':
         farmacia = db.query(Farmacia).filter(Farmacia.id == usuario.farmacia_id).first()
@@ -665,114 +667,4 @@ async def surtir_receta(
         "message": "Receta surtida con éxito",
         "receta_id": receta.id,
         "contenido_receta": mensaje.decode()
-    }
-
-@app.post("/registrar_paciente/")
-async def registrar_paciente(datos: PacienteNuevo, db: Session = Depends(get_db)):
-    # Verifica si el username ya existe
-    existing_user = db.query(Usuario).filter(Usuario.username == datos.username).first()
-    if existing_user:
-        raise HTTPException(status_code=400, detail="El nombre de usuario ya está registrado.")
-    # Verifica que la clínica exista
-    clinica = db.query(Clinica).filter(Clinica.id == datos.clinica_id).first()
-    if not clinica:
-        raise HTTPException(status_code=400, detail="La clínica no existe.")
-    # Crea el usuario
-    hashed_password = hash_password(datos.password)
-    nuevo_usuario = Usuario(
-        username=datos.username,
-        password_hash=hashed_password,
-        tipo_usuario="paciente"
-    )
-    db.add(nuevo_usuario)
-    db.commit()
-    db.refresh(nuevo_usuario)
-    # Crea el paciente
-    nuevo_paciente = Paciente(
-        usuario_id=nuevo_usuario.id,
-        nombre=datos.nombre,
-        apellido_paterno=datos.apellido_paterno,
-        apellido_materno=datos.apellido_materno,
-        telefono=datos.telefono,
-        clinica_id=datos.clinica_id
-    )
-    db.add(nuevo_paciente)
-    db.commit()
-    db.refresh(nuevo_paciente)
-    return {
-        "usuario_id": nuevo_usuario.id,
-        "paciente_id": nuevo_paciente.id,
-        "username": nuevo_usuario.username,
-        "nombre": nuevo_paciente.nombre
-    }
-
-@app.post("/registrar_medico/")
-async def registrar_medico(datos: MedicoNuevo, db: Session = Depends(get_db)):
-    existing_user = db.query(Usuario).filter(Usuario.username == datos.username).first()
-    if existing_user:
-        raise HTTPException(status_code=400, detail="El nombre de usuario ya está registrado.")
-    clinica = db.query(Clinica).filter(Clinica.id == datos.clinica_id).first()
-    if not clinica:
-        raise HTTPException(status_code=400, detail="La clínica no existe.")
-    hashed_password = hash_password(datos.password)
-    nuevo_usuario = Usuario(
-        username=datos.username,
-        password_hash=hashed_password,
-        tipo_usuario="medico"
-    )
-    db.add(nuevo_usuario)
-    db.commit()
-    db.refresh(nuevo_usuario)
-    nuevo_medico = Medico(
-        usuario_id=nuevo_usuario.id,
-        nombre=datos.nombre,
-        apellido_paterno=datos.apellido_paterno,
-        apellido_materno=datos.apellido_materno,
-        especialidad=datos.especialidad,
-        telefono=datos.telefono,
-        clinica_id=datos.clinica_id
-    )
-    db.add(nuevo_medico)
-    db.commit()
-    db.refresh(nuevo_medico)
-    return {
-        "usuario_id": nuevo_usuario.id,
-        "medico_id": nuevo_medico.id,
-        "username": nuevo_usuario.username,
-        "nombre": nuevo_medico.nombre
-    }
-
-@app.post("/registrar_farmaceutico/")
-async def registrar_farmaceutico(datos: FarmaceuticoNuevo, db: Session = Depends(get_db)):
-    existing_user = db.query(Usuario).filter(Usuario.username == datos.username).first()
-    if existing_user:
-        raise HTTPException(status_code=400, detail="El nombre de usuario ya está registrado.")
-    farmacia = db.query(Farmacia).filter(Farmacia.id == datos.farmacia_id).first()
-    if not farmacia:
-        raise HTTPException(status_code=400, detail="La farmacia no existe.")
-    hashed_password = hash_password(datos.password)
-    nuevo_usuario = Usuario(
-        username=datos.username,
-        password_hash=hashed_password,
-        tipo_usuario="farmaceutico"
-    )
-    db.add(nuevo_usuario)
-    db.commit()
-    db.refresh(nuevo_usuario)
-    nuevo_farmaceutico = Farmaceutico(
-        usuario_id=nuevo_usuario.id,
-        nombre=datos.nombre,
-        apellido_paterno=datos.apellido_paterno,
-        apellido_materno=datos.apellido_materno,
-        telefono=datos.telefono,
-        farmacia_id=datos.farmacia_id
-    )
-    db.add(nuevo_farmaceutico)
-    db.commit()
-    db.refresh(nuevo_farmaceutico)
-    return {
-        "usuario_id": nuevo_usuario.id,
-        "farmaceutico_id": nuevo_farmaceutico.id,
-        "username": nuevo_usuario.username,
-        "nombre": nuevo_farmaceutico.nombre
     }
