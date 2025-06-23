@@ -1,4 +1,3 @@
-import os
 from fastapi import FastAPI, Depends, HTTPException, File, UploadFile, Form
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import create_engine, Column, Integer, String, Boolean, ForeignKey, Text, TIMESTAMP
@@ -19,9 +18,7 @@ from fastapi.responses import FileResponse
 from typing import Union, Optional
 from datetime import datetime
 from tempfile import NamedTemporaryFile
-import zipfile
-from io import BytesIO
-from fastapi.responses import StreamingResponse
+import os
 
 DATABASE_URL = "postgresql://postgres.gijqjegotyhtdbngcuth:nedtu3-ruqvec-mixSew@aws-0-us-east-2.pooler.supabase.com:6543/postgres"
 
@@ -291,123 +288,68 @@ async def create_usuario(usuario: Union[MedicoCreate, PacienteCreate, Farmaceuti
     # Si el tipo de usuario no es reconocido
     raise HTTPException(status_code=400, detail="Tipo de usuario no válido.")
 
-
-
-from fastapi import FastAPI, Depends, HTTPException
-from sqlalchemy.orm import Session
-
-
-from fastapi import FastAPI, Depends, HTTPException
-from sqlalchemy.orm import Session
-from passlib.context import CryptContext
-import os, serialization
-
-from .database import get_db
-from .models import Usuario, Medico, Paciente, Farmaceutico
-from .security import generate_ed25519_keys, generate_x25519_keys, TEMP_DIR
-
-pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
-app = FastAPI()
-
-
 @app.post("/login/")
 async def login(username: str, password: str, db: Session = Depends(get_db)):
-    # 1) Validar existencia de usuario y contraseña
     user = db.query(Usuario).filter(Usuario.username == username).first()
+
     if not user:
         raise HTTPException(status_code=404, detail="Usuario no encontrado")
+    
     if not pwd_context.verify(password, user.password_hash):
         raise HTTPException(status_code=401, detail="Contraseña incorrecta")
 
-    # 2) Extraer sólo el id de la tabla correspondiente
-    if user.tipo_usuario == "medico":
-        category_id = db.query(Medico.id) \
-                        .filter(Medico.usuario_id == user.id) \
-                        .scalar()
-    elif user.tipo_usuario == "paciente":
-        category_id = db.query(Paciente.id) \
-                        .filter(Paciente.usuario_id == user.id) \
-                        .scalar()
-    else:  # farmacéutico
-        category_id = db.query(Farmaceutico.id) \
-                        .filter(Farmaceutico.usuario_id == user.id) \
-                        .scalar()
-
-    if category_id is None:
-        raise HTTPException(status_code=404, detail=f"{user.tipo_usuario.capitalize()} no encontrado")
-
-    # 3) Si ya existían llaves, devolvemos ambos IDs y metadatos
     if user.llavesgeneradas:
-        return {
-            "usuario_id":   user.id,
-            "category_id":  category_id,
-            "username":     user.username,
-            "tipo_usuario": user.tipo_usuario
-        }
-
-    # 4) Primer login: generamos y almacenamos llaves
-    priv_ed, pub_ed = generate_ed25519_keys()
-    priv_x,   pub_x   = generate_x25519_keys()
-    user.public_key_ed   = pub_ed
-    user.public_key_x255 = pub_x
+        return {"username": user.username, "tipo_usuario": user.tipo_usuario}
+    
+    private_key_ed, public_key_ed = generate_ed25519_keys()
+    private_key_x255, public_key_x255 = generate_x25519_keys()
+    
+    user.public_key_ed = public_key_ed
+    user.public_key_x255 = public_key_x255
     user.llavesgeneradas = True
     db.commit()
 
-    # 5) Guardar PEMs en TEMP_DIR
-    ed_pem = priv_ed.private_bytes(
+    # Guardar las claves privadas en archivos temporales
+    private_key_ed_pem = private_key_ed.private_bytes(
         encoding=serialization.Encoding.PEM,
         format=serialization.PrivateFormat.PKCS8,
         encryption_algorithm=serialization.NoEncryption()
     )
-    x_pem = priv_x.private_bytes(
+    
+    private_key_x255_pem = private_key_x255.private_bytes(
         encoding=serialization.Encoding.PEM,
         format=serialization.PrivateFormat.PKCS8,
         encryption_algorithm=serialization.NoEncryption()
     )
-    ed_path   = os.path.join(TEMP_DIR, f"private_key_ed_{username}.pem")
-    x255_path = os.path.join(TEMP_DIR, f"private_key_x255_{username}.pem")
-    with open(ed_path,   "wb") as f: f.write(ed_pem)
-    with open(x255_path, "wb") as f: f.write(x_pem)
 
-    # 6) Devolver IDs, llaves públicas y URL del ZIP
+    # Guardar los archivos en el sistema de archivos temporal
+    ed_file_path = os.path.join(TEMP_DIR, f"private_key_ed_{username}.pem")
+    x255_file_path = os.path.join(TEMP_DIR, f"private_key_x255_{username}.pem")
+
+    with open(ed_file_path, "wb") as ed_file:
+        ed_file.write(private_key_ed_pem)
+
+    with open(x255_file_path, "wb") as x255_file:
+        x255_file.write(private_key_x255_pem)
+
+    # Devolver las URLs de los archivos generados
     return {
-        "usuario_id":      user.id,
-        "category_id":     category_id,
-        "username":        user.username,
-        "tipo_usuario":    user.tipo_usuario,
-        "public_key_ed":   pub_ed,
-        "public_key_x255": pub_x,
-        "private_key_zip": f"/download/keys/{username}"
+        "username": user.username,
+        "tipo_usuario": user.tipo_usuario,
+        "public_key_ed": public_key_ed,
+        "public_key_x255": public_key_x255,
+        "private_key_ed_file": {"url": f"/download/{os.path.basename(ed_file_path)}"},
+        "private_key_x255_file": {"url": f"/download/{os.path.basename(x255_file_path)}"}
     }
 
+@app.get("/download/{filename}")
+async def download_file(filename: str):
+    file_path = os.path.join(TEMP_DIR, filename)
 
-@app.get("/download/keys/{filename}")
-async def download_all_keys(username: str):
-    """
-    Empaqueta private_key_ed_<username>.pem y private_key_x255_<username>.pem 
-    en un ZIP y lo devuelve en una sola respuesta.
-    """
-    # Rutas de los archivos
-    ed_path   = os.path.join(TEMP_DIR, f"private_key_ed_{username}.pem")
-    x255_path = os.path.join(TEMP_DIR, f"private_key_x255_{username}.pem")
-
-    # Validar que existan ambos
-    if not os.path.exists(ed_path) or not os.path.exists(x255_path):
-        raise HTTPException(status_code=404, detail="Alguna de las claves no existe")
-
-    # Crear un ZIP en memoria
-    buffer = BytesIO()
-    with zipfile.ZipFile(buffer, mode="w", compression=zipfile.ZIP_DEFLATED) as zipf:
-        zipf.write(ed_path,   arcname=os.path.basename(ed_path))
-        zipf.write(x255_path, arcname=os.path.basename(x255_path))
-    buffer.seek(0)
-
-    # Devolverlo como streaming
-    return StreamingResponse(
-        buffer,
-        media_type="application/zip",
-        headers={"Content-Disposition": f"attachment; filename=keys_{username}.zip"}
-    )
+    if not os.path.exists(file_path):
+        raise HTTPException(status_code=404, detail="File not found")
+    
+    return FileResponse(file_path, media_type="application/pem", filename=filename)
 
 @app.post("/firmar_receta/")
 async def firmar_receta(
@@ -678,7 +620,7 @@ async def surtir_receta(
     
     # Derivar clave AES y descifrar mensaje
     try:
-        aes_key = bytes.fromhex(receta.clave_aes) 
+        aes_key = intercambiar_claves_x25519(private_key_x255_pem, paciente.usuario.public_key_x255)
         cipher = Cipher(algorithms.AES(aes_key), modes.GCM(bytes.fromhex(receta.nonce), bytes.fromhex(receta.tag)), backend=default_backend())
         decryptor = cipher.decryptor()
         mensaje = decryptor.update(bytes.fromhex(receta.receta_cifrada)) + decryptor.finalize()
@@ -696,80 +638,4 @@ async def surtir_receta(
         "receta_id": receta.id,
         "contenido_receta": mensaje.decode()
     }
-
-# Listado de recetas por paciente
-@app.get("/recetas/paciente/{paciente_id}")
-async def recetas_por_paciente(paciente_id: int, db: Session = Depends(get_db)):
-    recetas = db.query(Receta).filter(Receta.paciente_id == paciente_id).all()
-    return {
-        "recetas": [
-            {
-                "id": r.id,
-                "fecha_emision": r.fecha_emision,
-                "fecha_vencimiento": r.fecha_vencimiento,
-                "estado": r.estado,
-                "medico": r.medico.nombre,
-                "firma_valida": r.firma is not None
-            } for r in recetas
-        ]
-    }
-# Endpoint para ver el contenido descrifrado de una receta
-@app.post("/recetas/ver_contenido/{receta_id}")
-async def ver_receta_paciente(
-    receta_id: int,
-    private_key_file_x255: UploadFile = File(...),
-    db: Session = Depends(get_db)
-):
-    receta = db.query(Receta).filter(Receta.id == receta_id).first()
-    if not receta:
-        raise HTTPException(status_code=404, detail="Receta no encontrada")
-
-    # Validación: solo el paciente debe poder ver esta receta
-    public_key_paciente = receta.paciente.usuario.public_key_x255
-    if not public_key_paciente:
-        raise HTTPException(status_code=404, detail="Clave pública no encontrada")
-
-    # Leer clave privada del paciente
-    private_key_x255_pem = await private_key_file_x255.read()
-
-    try:
-        aes_key = intercambiar_claves_x25519(private_key_x255_pem, public_key_paciente)
-        cipher = Cipher(algorithms.AES(aes_key), modes.GCM(bytes.fromhex(receta.nonce), bytes.fromhex(receta.tag)), backend=default_backend())
-        decryptor = cipher.decryptor()
-        mensaje = decryptor.update(bytes.fromhex(receta.receta_cifrada)) + decryptor.finalize()
-    except Exception as e:
-        raise HTTPException(status_code=400, detail="Error al descifrar la receta")
-
-    return {
-        "mensaje_descifrado": mensaje.decode()
-    }
-@app.get("/download/keys/{username}")
-async def download_all_keys(username: str):
-    """
-    Empaqueta private_key_ed_<username>.pem y private_key_x255_<username>.pem 
-    en un ZIP y lo devuelve en una sola respuesta.
-    """
-    ed_path   = os.path.join(TEMP_DIR, f"private_key_ed_{username}.pem")
-    x255_path = os.path.join(TEMP_DIR, f"private_key_x255_{username}.pem")
-
-    if not os.path.exists(ed_path) or not os.path.exists(x255_path):
-        raise HTTPException(status_code=404, detail="Alguna de las claves no existe")
-
-    buffer = BytesIO()
-    with zipfile.ZipFile(buffer, mode="w", compression=zipfile.ZIP_DEFLATED) as zipf:
-        zipf.write(ed_path,   arcname=os.path.basename(ed_path))
-        zipf.write(x255_path, arcname=os.path.basename(x255_path))
-    buffer.seek(0)
-
-    return StreamingResponse(
-        buffer,
-        media_type="application/zip",
-        headers={"Content-Disposition": f"attachment; filename=keys_{username}.zip"}
-    )
-@app.get("/prueba/")
-async def get_usuarios(db: Session = Depends(get_db)):
-    # Realizar el SELECT en la tabla de usuarios
-    query = select(Usuario)
-    result = db.execute(query).scalars().all()  # Obtener todos los usuarios
-    return {"usuarios": result}
 
