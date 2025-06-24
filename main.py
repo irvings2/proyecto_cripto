@@ -225,13 +225,14 @@ async def create_usuario(usuario: Union[MedicoCreate, PacienteCreate, Farmaceuti
     db.commit()  # Guardar el usuario en la tabla de usuarios
     db.refresh(new_user)  # Obtener el id generado
 
+    # Validar clínicas/farmacias según el tipo
+    clinica = None
     if usuario.tipo_usuario in ['medico', 'paciente']:
         if usuario.clinica_id is not None:
             clinica = db.query(Clinica).filter(Clinica.id == usuario.clinica_id).first()
             if not clinica:
                 raise HTTPException(status_code=400, detail="La clínica no existe.")
 
-    
     if usuario.tipo_usuario == 'farmaceutico':
         farmacia = db.query(Farmacia).filter(Farmacia.id == usuario.farmacia_id).first()
         if not farmacia:
@@ -244,18 +245,22 @@ async def create_usuario(usuario: Union[MedicoCreate, PacienteCreate, Farmaceuti
             nombre=usuario.nombre,
             apellido_paterno=usuario.apellido_paterno,
             apellido_materno=usuario.apellido_materno,
-            especialidad=usuario.especialidad,  # Recibido desde el frontend
+            especialidad=usuario.especialidad,
             telefono=usuario.telefono,
-            clinica_id=usuario.clinica_id  # Asignar clínica al médico
+            clinica_id=usuario.clinica_id
         )
         db.add(medico)
         db.commit()
+        return {
+            "id": new_user.id,
+            "username": new_user.username,
+            "tipo_usuario": new_user.tipo_usuario,
+            "nombre": medico.nombre,
+            "apellido_paterno": medico.apellido_paterno,
+            "especialidad": medico.especialidad,
+            "clinica": clinica.nombre if clinica else None
+        }
 
-        # Devolvemos la respuesta con los datos del médico
-        return {"id": new_user.id, "username": new_user.username, "tipo_usuario": new_user.tipo_usuario, 
-                "nombre": medico.nombre, "apellido_paterno": medico.apellido_paterno, "especialidad": medico.especialidad, 
-                "clinica": clinica.nombre}
-        
     if usuario.tipo_usuario == 'paciente':
         paciente = Paciente(
             usuario_id=new_user.id,
@@ -263,15 +268,19 @@ async def create_usuario(usuario: Union[MedicoCreate, PacienteCreate, Farmaceuti
             apellido_paterno=usuario.apellido_paterno,
             apellido_materno=usuario.apellido_materno,
             telefono=usuario.telefono,
-            clinica_id=usuario.clinica_id  # Asignar clínica al médico
+            clinica_id=usuario.clinica_id
         )
         db.add(paciente)
         db.commit()
+        return {
+            "id": new_user.id,
+            "username": new_user.username,
+            "tipo_usuario": new_user.tipo_usuario,
+            "nombre": paciente.nombre,
+            "apellido_paterno": paciente.apellido_paterno,
+            "clinica": clinica.nombre if clinica else None
+        }
 
-        # Devolvemos la respuesta con los datos del médico
-        return {"id": new_user.id, "username": new_user.username, "tipo_usuario": new_user.tipo_usuario, 
-                "nombre": paciente.nombre, "apellido_paterno": paciente.apellido_paterno, "clinica": clinica.nombre}
-        
     if usuario.tipo_usuario == 'farmaceutico':
         farmaceutico = Farmaceutico(
             usuario_id=new_user.id,
@@ -283,13 +292,18 @@ async def create_usuario(usuario: Union[MedicoCreate, PacienteCreate, Farmaceuti
         )
         db.add(farmaceutico)
         db.commit()
+        return {
+            "id": new_user.id,
+            "username": new_user.username,
+            "tipo_usuario": new_user.tipo_usuario,
+            "nombre": farmaceutico.nombre,
+            "apellido_paterno": farmaceutico.apellido_paterno,
+            "farmacia": farmaceutico.farmacia
+        }
 
-        # Devolvemos la respuesta con los datos del médico
-        return {"id": new_user.id, "username": new_user.username, "tipo_usuario": new_user.tipo_usuario, 
-                "nombre": farmaceutico.nombre, "apellido_paterno": farmaceutico.apellido_paterno, "farmacia": farmaceutico.farmacia}
-    
     # Si el tipo de usuario no es reconocido
     raise HTTPException(status_code=400, detail="Tipo de usuario no válido.")
+
 
 @app.post("/login/")
 async def login(username: str, password: str, db: Session = Depends(get_db)):
