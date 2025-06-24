@@ -688,7 +688,6 @@ async def obtener_contenido_receta(
     if not receta:
         raise HTTPException(status_code=404, detail="Receta no encontrada")
     try:
-        # Descifrar usando la clave AES almacenada (ya está en hex string)
         aes_key = bytes.fromhex(receta.clave_aes)
         cipher = Cipher(
             algorithms.AES(aes_key),
@@ -703,4 +702,9 @@ async def obtener_contenido_receta(
     return {
         "receta_id": receta.id,
         "contenido_receta": mensaje.decode("utf-8"),
+        "estado": receta.estado,
+        "fecha_emision": receta.fecha_emision,
+        "fecha_vencimiento": receta.fecha_vencimiento,
+        "fecha_surtido": receta.fecha_surtido,
     }
+
