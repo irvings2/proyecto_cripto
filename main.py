@@ -23,11 +23,9 @@ import os
 
 DATABASE_URL = "postgresql://postgres.gijqjegotyhtdbngcuth:nedtu3-ruqvec-mixSew@aws-0-us-east-2.pooler.supabase.com:6543/postgres"
 
-# Crear la base y el motor de SQLAlchemy
 engine = create_engine(DATABASE_URL, pool_size=10, max_overflow=20)
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
-# Ruta temporal para guardar los archivos
 TEMP_DIR = "temp"
 
 # Crear directorio si no existe
@@ -39,7 +37,7 @@ if not os.path.exists(TEMP_DIR):
 Base = declarative_base()
 
 class Usuario(Base):
-    __tablename__ = 'usuario'  # Nombre de tu tabla
+    __tablename__ = 'usuario'  
     id = Column(Integer, primary_key=True, index=True)
     username = Column(String, index=False)
     password_hash = Column(String, index=False)
@@ -56,7 +54,7 @@ class Medico(Base):
     __tablename__ = 'medico'
 
     id = Column(Integer, primary_key=True, index=True)
-    usuario_id = Column(Integer, ForeignKey('usuario.id'))  # Relación con la tabla usuarios
+    usuario_id = Column(Integer, ForeignKey('usuario.id'))  
     nombre = Column(String)
     apellido_paterno = Column(String)
     apellido_materno = Column(String)
@@ -72,7 +70,7 @@ class Paciente(Base):
     __tablename__ = 'paciente'
 
     id = Column(Integer, primary_key=True, index=True)
-    usuario_id = Column(Integer, ForeignKey('usuario.id'))  # Relación con la tabla usuarios
+    usuario_id = Column(Integer, ForeignKey('usuario.id')) 
     nombre = Column(String)
     apellido_paterno = Column(String)
     apellido_materno = Column(String)
@@ -87,7 +85,7 @@ class Farmaceutico(Base):
     __tablename__ = 'farmaceutico'
 
     id = Column(Integer, primary_key=True, index=True)
-    usuario_id = Column(Integer, ForeignKey('usuario.id'))  # Relación con la tabla de usuarios
+    usuario_id = Column(Integer, ForeignKey('usuario.id'))
     nombre = Column(String)
     apellido_paterno = Column(String)
     apellido_materno = Column(String, nullable=True)
@@ -105,7 +103,6 @@ class Clinica(Base):
     nombre = Column(String)
     tipo = Column(String)
 
-    # Relación de una clínica con sus pacientes y médicos
     medico = relationship("Medico", back_populates="clinica")
     paciente = relationship("Paciente", back_populates="clinica")
     
@@ -136,7 +133,6 @@ class Receta(Base):
     firma = Column(String)
     clave_aes = Column(String)
 
-    # Relaciones con otras tablas
     paciente = relationship("Paciente", back_populates="receta")
     medico = relationship("Medico", back_populates="receta")
     farmaceutico = relationship("Farmaceutico", back_populates="receta")
@@ -145,13 +141,13 @@ app = FastAPI()
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # Permite todas las solicitudes de cualquier origen
+    allow_origins=["*"],  
     allow_credentials=True,
-    allow_methods=["*"],  # Permite todos los métodos (GET, POST, etc.)
-    allow_headers=["*"],  # Permite todos los encabezados
+    allow_methods=["*"],  
+    allow_headers=["*"],  
 )
 
-# Dependencia para obtener la sesión de base de datos
+
 def get_db():
     db = SessionLocal()
     try:
@@ -159,7 +155,7 @@ def get_db():
     finally:
         db.close()
         
-# Pydantic model para la validación de datos del nuevo usuario
+
 class UsuarioCreate(BaseModel):
     username: str
     password: str
@@ -175,21 +171,21 @@ class MedicoCreate(UsuarioCreate):
     apellido_materno: str
     especialidad: str
     telefono: str
-    clinica_id: int  # Relación con la clínica
+    clinica_id: int  
     
 class PacienteCreate(UsuarioCreate):
     nombre: str
     apellido_paterno: str
     apellido_materno: str
     telefono: str
-    clinica_id: Optional[int] = None  # Relación con la clínica, opcional para pacientes
+    clinica_id: Optional[int] = None  
     
 class FarmaceuticoCreate(UsuarioCreate):
     nombre: str
     apellido_paterno: str
     apellido_materno: str
     telefono: str
-    farmacia_id: int  # Relación con la clínica
+    farmacia_id: int  
     clinica_id: Optional[int] = None
 
 # Configuración de passlib para el hash de la contraseña
@@ -201,9 +197,9 @@ def hash_password(password: str):
 
 @app.get("/usuarios/")
 async def get_usuarios(db: Session = Depends(get_db)):
-    # Realizar el SELECT en la tabla de usuarios
+
     query = select(Usuario)
-    result = db.execute(query).scalars().all()  # Obtener todos los usuarios
+    result = db.execute(query).scalars().all() 
     return {"usuarios": result}
 
 @app.post("/usuarios/")
@@ -213,8 +209,8 @@ async def create_usuario(usuario: Union[MedicoCreate, PacienteCreate, Farmaceuti
     if existing_user:
         raise HTTPException(status_code=400, detail="El nombre de usuario ya está registrado.")
 
-    # Crear una nueva instancia de Usuario y agregarla a la base de datos
-    hashed_password = hash_password(usuario.password)  # Generar el hash de la contraseña
+
+    hashed_password = hash_password(usuario.password) 
     new_user = Usuario(
         username=usuario.username,
         password_hash=hashed_password,
@@ -223,9 +219,8 @@ async def create_usuario(usuario: Union[MedicoCreate, PacienteCreate, Farmaceuti
 
     db.add(new_user)
     db.commit()  # Guardar el usuario en la tabla de usuarios
-    db.refresh(new_user)  # Obtener el id generado
+    db.refresh(new_user) 
 
-    # Validar clínicas/farmacias según el tipo
     clinica = None
     if usuario.tipo_usuario in ['medico', 'paciente']:
         if usuario.clinica_id is not None:
@@ -238,7 +233,6 @@ async def create_usuario(usuario: Union[MedicoCreate, PacienteCreate, Farmaceuti
         if not farmacia:
             raise HTTPException(status_code=400, detail="La farmacia no existe.")
 
-    # Dependiendo del tipo de usuario, crear la entrada en la tabla correspondiente
     if usuario.tipo_usuario == 'medico':
         medico = Medico(
             usuario_id=new_user.id,
@@ -301,7 +295,6 @@ async def create_usuario(usuario: Union[MedicoCreate, PacienteCreate, Farmaceuti
             "farmacia": farmaceutico.farmacia
         }
 
-    # Si el tipo de usuario no es reconocido
     raise HTTPException(status_code=400, detail="Tipo de usuario no válido.")
 
 
@@ -315,8 +308,25 @@ async def login(username: str, password: str, db: Session = Depends(get_db)):
     if not pwd_context.verify(password, user.password_hash):
         raise HTTPException(status_code=401, detail="Contraseña incorrecta")
 
+    # Consulta para obtener el id de paciente, médico o farmacéutico
+    id_tipo = None
+    if user.tipo_usuario == "paciente":
+        paciente = db.query(Paciente).filter(Paciente.usuario_id == user.id).first()
+        id_tipo = paciente.id if paciente else None
+    elif user.tipo_usuario == "medico":
+        medico = db.query(Medico).filter(Medico.usuario_id == user.id).first()
+        id_tipo = medico.id if medico else None
+    elif user.tipo_usuario == "farmaceutico":
+        farmaceutico = db.query(Farmaceutico).filter(Farmaceutico.usuario_id == user.id).first()
+        id_tipo = farmaceutico.id if farmaceutico else None
+
+    # Si las llaves ya están generadas, regresar solo los datos básicos
     if user.llavesgeneradas:
-        return {"username": user.username, "tipo_usuario": user.tipo_usuario}
+        return {
+            "username": user.username,
+            "tipo_usuario": user.tipo_usuario,
+            "id_tipo": id_tipo,
+        }
     
     private_key_ed, public_key_ed = generate_ed25519_keys()
     private_key_x255, public_key_x255 = generate_x25519_keys()
@@ -353,11 +363,13 @@ async def login(username: str, password: str, db: Session = Depends(get_db)):
     return {
         "username": user.username,
         "tipo_usuario": user.tipo_usuario,
+        "id_tipo": id_tipo,  # Nuevo campo con el ID correspondiente según el tipo
         "public_key_ed": public_key_ed,
         "public_key_x255": public_key_x255,
         "private_key_ed_file": {"url": f"/download/{os.path.basename(ed_file_path)}"},
         "private_key_x255_file": {"url": f"/download/{os.path.basename(x255_file_path)}"}
     }
+
 
 @app.get("/download/{filename}")
 async def download_file(filename: str):
@@ -418,24 +430,25 @@ async def firmar_receta(
         # Firmar el mensaje con la clave privada Ed25519
         signature = firmar_mensaje_con_ed25519(private_key_ed, mensaje)
         
-        firma_hex = signature.hex()  # Convertir la firma a hexadecimal
-        nonce_hex = nonce.hex()  # Convertir el nonce a hexadecimal
-        tag_hex = tag.hex()  # Convertir el tag a hexadecimal
-        aes_key_hex = aes_key.hex()  # Convertir la clave AES a hexadecimal
-        receta_cifrada_hex = ciphertext.hex()  # Convertir la receta cifrada a hexadecimal
+        # A hexadecimal
+        firma_hex = signature.hex() 
+        nonce_hex = nonce.hex()  
+        tag_hex = tag.hex()  
+        aes_key_hex = aes_key.hex()  
+        receta_cifrada_hex = ciphertext.hex() 
 
         # Crear la receta y almacenar en la base de datos (clave AES cifrada para cada usuario)
         nueva_receta = Receta(
             paciente_id=paciente_id,
             medico_id=medico_id,
             farmaceutico_id=farmaceutico_id,
-            estado="emitida",  # Ejemplo de estado
+            estado="emitida",  
             fecha_emision=datetime.utcnow(),
             fecha_vencimiento=fecha_vencimiento,
-            receta_cifrada=receta_cifrada_hex,  # Guardar el mensaje cifrado
-            nonce=nonce_hex,  # Guardar el nonce
-            tag=tag_hex,  # Guardar el tag
-            firma=firma_hex,  # Guardar la firma
+            receta_cifrada=receta_cifrada_hex,  
+            nonce=nonce_hex,  
+            tag=tag_hex,  
+            firma=firma_hex, 
             clave_aes=aes_key_hex
         )
 
@@ -450,7 +463,7 @@ async def firmar_receta(
     
 @app.post("/verificar_firma/")
 async def verificar_firma(
-    idreceta: int,  # Recibimos el idreceta
+    idreceta: int,  
     db: Session = Depends(get_db)
 ):
     try:
@@ -459,12 +472,10 @@ async def verificar_firma(
         if not receta:
             raise HTTPException(status_code=404, detail="Receta no encontrada")
 
-        # Obtener el médico de la receta
         medico_id = receta.medico_id
         if not medico_id:
             raise HTTPException(status_code=404, detail="Médico no asociado a la receta")
         
-        # Obtener el médico desde la base de datos
         medico = db.query(Medico).filter(Medico.id == medico_id).first()
         if not medico:
             raise HTTPException(status_code=404, detail="Médico no encontrado")
@@ -487,25 +498,23 @@ async def verificar_firma(
         nonce = bytes.fromhex(receta.nonce)
         tag = bytes.fromhex(receta.tag)
 
-        # Desencriptar el mensaje utilizando AES-GCM
+        # descifrar el mensaje utilizando AES-GCM
         cipher = Cipher(algorithms.AES(aes_key), modes.GCM(nonce, tag), backend=default_backend())
         decryptor = cipher.decryptor()
 
-        # Desencriptar el mensaje
+        # descifrar el mensaje
         try:
             mensaje_descifrado = decryptor.update(bytes.fromhex(receta.receta_cifrada)) + decryptor.finalize()
         except Exception as e:
             raise HTTPException(status_code=400, detail="Error al descifrar el mensaje")
 
-        # Verificar la firma usando Ed25519
+        # Verificar la firma
         ed_key = public_key if isinstance(public_key, ed25519.Ed25519PublicKey) else None
         if not ed_key:
             raise HTTPException(status_code=400, detail="Clave pública no es de tipo Ed25519")
 
-        # Verificar la firma con el mensaje descifrado
-        ed_key.verify(firma, mensaje_descifrado)  # Verificar firma sin padding ni hash
+        ed_key.verify(firma, mensaje_descifrado) 
 
-        # Si la firma es válida, devolver un mensaje de éxito
         return {"message": "Firma verificada correctamente"}
 
     except Exception as e:
@@ -519,10 +528,9 @@ def generate_x25519_keys():
     # Obtener la clave pública
     public_key = private_key.public_key()
 
-    # Serializar las llaves a formato PEM para que puedan ser enviadas
     private_pem = private_key.private_bytes(
         encoding=serialization.Encoding.PEM,
-        format=serialization.PrivateFormat.PKCS8,  # Cambiado a PKCS8
+        format=serialization.PrivateFormat.PKCS8,  
         encryption_algorithm=serialization.NoEncryption()
     )
 
@@ -538,7 +546,6 @@ def generate_ed25519_keys():
     private_key = ed25519.Ed25519PrivateKey.generate()
     public_key = private_key.public_key()
     
-    # Serializar la clave pública a formato PEM
     public_key_pem = public_key.public_bytes(
         encoding=serialization.Encoding.PEM,
         format=serialization.PublicFormat.SubjectPublicKeyInfo
@@ -556,7 +563,7 @@ def intercambiar_claves_x25519(private_key_pem, public_key_pem):
     shared_key = private_key.exchange(public_key)
 
     # Usamos directamente la clave compartida como clave AES (32 bytes)
-    aes_key = shared_key[:32]  # Asegurarnos de que sea de 256 bits (32 bytes)
+    aes_key = shared_key[:32]
 
     return aes_key
 
@@ -580,25 +587,21 @@ def cifrar_con_aes_gcm(mensaje: str, key: bytes):
 
     return ciphertext, nonce, tag
 
-# Función para firmar el mensaje con Ed25519
 def firmar_mensaje_con_ed25519(private_key, mensaje):
     # Firma del mensaje con la clave privada Ed25519
     signature = private_key.sign(mensaje.encode())
     return signature
 
-# Endpoint para obtener las recetas de un paciente específico
 @app.get("/recetas/paciente/{paciente_id}")
 async def recetas_por_paciente(paciente_id: int, db: Session = Depends(get_db)):
     recetas = db.query(Receta).filter(Receta.paciente_id == paciente_id).all()
     return {"recetas": [r.id for r in recetas]}
 
-# Consulta de recetas emitidas por un médico específico
 @app.get("/recetas/medico/{medico_id}")
 async def recetas_por_medico(medico_id: int, db: Session = Depends(get_db)):
     recetas = db.query(Receta).filter(Receta.medico_id == medico_id).all()
     return {"recetas": [r.id for r in recetas]}
 
-# Consulta de recetas asignadas a un farmacéutico específico
 @app.get("/recetas/farmaceutico/{farmaceutico_id}")
 async def recetas_por_farmaceutico(farmaceutico_id: int, db: Session = Depends(get_db)):
     recetas = db.query(Receta).filter(Receta.farmaceutico_id == farmaceutico_id).all()
@@ -638,7 +641,6 @@ async def surtir_receta(
     except Exception as e:
         raise HTTPException(status_code=400, detail="Error al descifrar la receta: " + str(e))
 
-    # Marcar receta como surtida
     receta.estado = "surtida"
     receta.fecha_surtido = datetime.utcnow()
     receta.farmaceutico_id = farmaceutico_id
@@ -695,7 +697,7 @@ from fastapi import UploadFile, File, Form
 async def obtener_contenido_receta(
     receta_id: int,
     usuario_id: int = Form(...),
-    tipo_usuario: str = Form(...),  # "paciente", "medico", "farmaceutico"
+    tipo_usuario: str = Form(...),  
     db: Session = Depends(get_db)
 ):
     receta = db.query(Receta).filter(Receta.id == receta_id).first()
