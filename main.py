@@ -408,20 +408,12 @@ async def firmar_receta(
         private_key_x255_pem = await private_key_file_x255.read()
         private_key_x255 = serialization.load_pem_private_key(private_key_x255_pem, password=None, backend=default_backend()) # Cargar clave privada X25519
 
-        # Obtener la clave pública de X25519 del médico desde la base de datos
-        public_key_x255_pem_medico = medico.usuario.public_key_x255
-        if not public_key_x255_pem_medico:
-            raise HTTPException(status_code=404, detail="Clave pública X25519 no encontrada")
-        
+        # Obtener la clave pública de X25519 del paciente desde la base de datos
         public_key_x255_pem_paciente = paciente.usuario.public_key_x255
         if not public_key_x255_pem_paciente:
-            raise HTTPException(status_code=404, detail="Clave pública X25519 no encontrada")
-        
-        public_key_x255_pem_farmaceutico = farmaceutico.usuario.public_key_x255
-        if not public_key_x255_pem_farmaceutico:
-            raise HTTPException(status_code=404, detail="Clave pública X25519 no encontrada")
+            raise HTTPException(status_code=404, detail="Clave pública X25519 no encontrada para el paciente")
 
-         # Generar la clave de AES con el intercambio de claves X25519
+        # Generar la clave de AES con el intercambio de claves X25519
         aes_key = intercambiar_claves_x25519(private_key_x255_pem, public_key_x255_pem_paciente)  # Generar la clave AES con la clave pública del paciente
 
         # Cifrar el mensaje (receta) con la clave AES
@@ -429,27 +421,20 @@ async def firmar_receta(
 
         # Firmar el mensaje con la clave privada Ed25519
         signature = firmar_mensaje_con_ed25519(private_key_ed, mensaje)
-        
-        # A hexadecimal
-        firma_hex = signature.hex() 
-        nonce_hex = nonce.hex()  
-        tag_hex = tag.hex()  
-        aes_key_hex = aes_key.hex()  
-        receta_cifrada_hex = ciphertext.hex() 
 
-        # Crear la receta y almacenar en la base de datos (clave AES cifrada para cada usuario)
+        # Guardar todo en binario directamente (incluida la clave AES)
         nueva_receta = Receta(
             paciente_id=paciente_id,
             medico_id=medico_id,
             farmaceutico_id=farmaceutico_id,
-            estado="emitida",  
+            estado="emitida",
             fecha_emision=datetime.utcnow(),
             fecha_vencimiento=fecha_vencimiento,
-            receta_cifrada=receta_cifrada_hex,  
-            nonce=nonce_hex,  
-            tag=tag_hex,  
-            firma=firma_hex, 
-            clave_aes=aes_key_hex
+            receta_cifrada=ciphertext,  # BINARIO
+            nonce=nonce,                # BINARIO
+            tag=tag,                    # BINARIO
+            firma=signature,            # BINARIO
+            clave_aes=aes_key           # BINARIO (la clave AES derivada)
         )
 
         db.add(nueva_receta)
@@ -457,10 +442,10 @@ async def firmar_receta(
         db.refresh(nueva_receta)
 
         return {"message": "Receta firmada y cifrada con éxito", "receta_id": nueva_receta.id}
-        
+
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"Error al firmar la receta: {e}")
-    
+
 @app.post("/verificar_firma/")
 async def verificar_firma(
     idreceta: int,  
