@@ -1,6 +1,6 @@
 from fastapi import FastAPI, Depends, HTTPException, File, UploadFile, Form
 from fastapi.middleware.cors import CORSMiddleware
-from sqlalchemy import create_engine, Column, Integer, String, Boolean, ForeignKey, Text, TIMESTAMP, LargeBinary
+from sqlalchemy import create_engine, Column, Integer, String, Boolean, ForeignKey, Text, TIMESTAMP
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker, Session, relationship
 from sqlalchemy import select
@@ -127,10 +127,10 @@ class Receta(Base):
     fecha_vencimiento = Column(TIMESTAMP, nullable=False)
     estado = Column(String(50), nullable=False, default='emitida')
     fecha_surtido = Column(TIMESTAMP, nullable=True)
-    receta_cifrada = Column(LargeBinary)
-    nonce = Column(LargeBinary)
-    tag = Column(LargeBinary)
-    firma = Column(LargeBinary)
+    receta_cifrada = Column(String)
+    nonce = Column(String)
+    tag = Column(String)
+    firma = Column(String)
     clave_aes = Column(String)
 
     paciente = relationship("Paciente", back_populates="receta")
@@ -726,4 +726,3 @@ async def obtener_contenido_receta(
         "fecha_vencimiento": receta.fecha_vencimiento,
         "fecha_surtido": receta.fecha_surtido,
     }
-
