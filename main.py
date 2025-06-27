@@ -19,6 +19,7 @@ from datetime import datetime
 from tempfile import NamedTemporaryFile
 from fastapi import Query
 import os
+import base64
 
 DATABASE_URL = "postgresql://postgres.gijqjegotyhtdbngcuth:nedtu3-ruqvec-mixSew@aws-0-us-east-2.pooler.supabase.com:6543/postgres"
 
@@ -234,6 +235,32 @@ def generate_rsa_keys():
 
     return private_key, public_key
 
+# Función para cargar las llaves RSA (pública y privada)
+def load_rsa_keys():
+    with open(private_key_path, "rb") as private_key_file:
+        private_key = serialization.load_pem_private_key(private_key_file.read(), password=None)
+    
+    with open(public_key_path, "rb") as public_key_file:
+        public_key = serialization.load_pem_public_key(public_key_file.read())
+
+    return private_key, public_key
+
+# Función para generar una clave AES-GCM de 256 bits
+def generate_aes_key():
+    return os.urandom(32)  # 32 bytes = 256 bits
+
+# Función para cifrar la clave AES con RSA-OAEP
+def encrypt_aes_key_with_rsa(aes_key: bytes, public_key):
+    ciphertext = public_key.encrypt(
+        aes_key,
+        padding.OAEP(
+            mgf=padding.MGF1(algorithm=hashes.SHA256()),
+            algorithm=hashes.SHA256(),
+            label=None
+        )
+    )
+    return base64.b64encode(ciphertext).decode('utf-8')
+
 # Función para cifrar el mensaje usando AES-GCM
 def cifrar_con_aes_gcm(mensaje: str, key: bytes):
     # Generar un nonce aleatorio de 12 bytes
@@ -405,10 +432,8 @@ async def login(username: str, password: str, db: Session = Depends(get_db)):
         }
     
     private_key_ed, public_key_ed = generate_ed25519_keys()
-    private_key_x255, public_key_x255 = generate_x25519_keys()
     
     user.public_key_ed = public_key_ed
-    user.public_key_x255 = public_key_x255
     user.llavesgeneradas = True
     db.commit()
 
@@ -418,22 +443,12 @@ async def login(username: str, password: str, db: Session = Depends(get_db)):
         format=serialization.PrivateFormat.PKCS8,
         encryption_algorithm=serialization.NoEncryption()
     )
-    
-    private_key_x255_pem = private_key_x255.private_bytes(
-        encoding=serialization.Encoding.PEM,
-        format=serialization.PrivateFormat.PKCS8,
-        encryption_algorithm=serialization.NoEncryption()
-    )
 
     # Guardar los archivos en el sistema de archivos temporal
     ed_file_path = os.path.join(TEMP_DIR, f"private_key_ed_{username}.pem")
-    x255_file_path = os.path.join(TEMP_DIR, f"private_key_x255_{username}.pem")
 
     with open(ed_file_path, "wb") as ed_file:
         ed_file.write(private_key_ed_pem)
-
-    with open(x255_file_path, "wb") as x255_file:
-        x255_file.write(private_key_x255_pem)
 
     # Devolver las URLs de los archivos generados
     return {
@@ -441,9 +456,7 @@ async def login(username: str, password: str, db: Session = Depends(get_db)):
         "tipo_usuario": user.tipo_usuario,
         "id_tipo": id_tipo,  # Nuevo campo con el ID correspondiente según el tipo
         "public_key_ed": public_key_ed,
-        "public_key_x255": public_key_x255,
         "private_key_ed_file": {"url": f"/download/{os.path.basename(ed_file_path)}"},
-        "private_key_x255_file": {"url": f"/download/{os.path.basename(x255_file_path)}"}
     }
 
 
@@ -465,7 +478,6 @@ async def firmar_receta(
     estado: str = Form("emitida"),
     mensaje: str = Form(...),
     private_key_file_ed: UploadFile = File(...),  # Clave privada Ed25519
-    private_key_file_x255: UploadFile = File(...),  # Clave privada X25519
     db: Session = Depends(get_db)
 ):
     try:
@@ -476,32 +488,19 @@ async def firmar_receta(
 
         if not paciente or not medico or not farmaceutico:
             raise HTTPException(status_code=404, detail="Usuario no encontrado")
+        
+        private_key, public_key = load_rsa_keys()
+        
+        aes_key = generate_aes_key()
 
         # Cargar las claves privadas
         private_key_ed_pem = await private_key_file_ed.read()
-        private_key_ed = serialization.load_pem_private_key(private_key_ed_pem, password=None, backend=default_backend())
-
-        private_key_x255_pem = await private_key_file_x255.read()
-        private_key_x255 = serialization.load_pem_private_key(private_key_x255_pem, password=None, backend=default_backend()) # Cargar clave privada X25519
-
-        # Obtener la clave pública de X25519 del médico desde la base de datos
-        public_key_x255_pem_medico = medico.usuario.public_key_x255
-        if not public_key_x255_pem_medico:
-            raise HTTPException(status_code=404, detail="Clave pública X25519 no encontrada")
-        
-        public_key_x255_pem_paciente = paciente.usuario.public_key_x255
-        if not public_key_x255_pem_paciente:
-            raise HTTPException(status_code=404, detail="Clave pública X25519 no encontrada")
-        
-        public_key_x255_pem_farmaceutico = farmaceutico.usuario.public_key_x255
-        if not public_key_x255_pem_farmaceutico:
-            raise HTTPException(status_code=404, detail="Clave pública X25519 no encontrada")
-
-         # Generar la clave de AES con el intercambio de claves X25519
-        aes_key = intercambiar_claves_x25519(private_key_x255_pem, public_key_x255_pem_paciente)  # Generar la clave AES con la clave pública del paciente
+        private_key_ed = serialization.load_pem_private_key(private_key_ed_pem, password=None, backend=default_backend())# Generar la clave AES con la clave pública del paciente
 
         # Cifrar el mensaje (receta) con la clave AES
         ciphertext, nonce, tag = cifrar_con_aes_gcm(mensaje, aes_key)
+        
+        encrypted_aes_key = encrypt_aes_key_with_rsa(aes_key, public_key)
 
         # Firmar el mensaje con la clave privada Ed25519
         signature = firmar_mensaje_con_ed25519(private_key_ed, mensaje)
@@ -509,8 +508,7 @@ async def firmar_receta(
         # A hexadecimal
         firma_hex = signature.hex() 
         nonce_hex = nonce.hex()  
-        tag_hex = tag.hex()  
-        aes_key_hex = aes_key.hex()  
+        tag_hex = tag.hex() 
         receta_cifrada_hex = ciphertext.hex() 
 
         # Crear la receta y almacenar en la base de datos (clave AES cifrada para cada usuario)
@@ -525,7 +523,7 @@ async def firmar_receta(
             nonce=nonce_hex,  
             tag=tag_hex,  
             firma=firma_hex, 
-            clave_aes=aes_key_hex
+            clave_aes=encrypted_aes_key
         )
 
         db.add(nueva_receta)
