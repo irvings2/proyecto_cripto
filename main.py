@@ -6,8 +6,7 @@ from sqlalchemy.orm import sessionmaker, Session, relationship
 from sqlalchemy import select
 from pydantic import BaseModel
 from passlib.context import CryptContext
-from cryptography.hazmat.primitives.asymmetric import ed25519, x25519
-from cryptography.hazmat.primitives.asymmetric.x25519 import X25519PrivateKey, X25519PublicKey
+from cryptography.hazmat.primitives.asymmetric import ed25519, rsa, padding
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
 from cryptography.hazmat.primitives import hashes
@@ -31,7 +30,10 @@ TEMP_DIR = "temp"
 # Crear directorio si no existe
 if not os.path.exists(TEMP_DIR):
     os.makedirs(TEMP_DIR)
-
+    
+# Ruta de almacenamiento de las llaves
+private_key_path = "private_key.pem"
+public_key_path = "public_key.pem"
 
 # Declarative Base para las tablas
 Base = declarative_base()
@@ -194,6 +196,80 @@ pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 # Función para generar el hash de la contraseña
 def hash_password(password: str):
     return pwd_context.hash(password)
+
+# Función para generar las llaves ED25519
+def generate_ed25519_keys():
+    private_key = ed25519.Ed25519PrivateKey.generate()
+    public_key = private_key.public_key()
+    
+    public_key_pem = public_key.public_bytes(
+        encoding=serialization.Encoding.PEM,
+        format=serialization.PublicFormat.SubjectPublicKeyInfo
+    ).decode('utf-8')
+    
+    return private_key, public_key_pem
+
+# Función para generar las llaves RSA
+def generate_rsa_keys():
+    # Generar par de llaves RSA
+    private_key = rsa.generate_private_key(
+        public_exponent=65537,
+        key_size=2048
+    )
+    public_key = private_key.public_key()
+
+    # Guardar las llaves en archivos
+    with open(private_key_path, "wb") as private_file:
+        private_file.write(private_key.private_bytes(
+            encoding=serialization.Encoding.PEM,
+            format=serialization.PrivateFormat.TraditionalOpenSSL,
+            encryption_algorithm=serialization.NoEncryption()
+        ))
+
+    with open(public_key_path, "wb") as public_file:
+        public_file.write(public_key.public_bytes(
+            encoding=serialization.Encoding.PEM,
+            format=serialization.PublicFormat.SubjectPublicKeyInfo
+        ))
+
+    return private_key, public_key
+
+# Función para cifrar el mensaje usando AES-GCM
+def cifrar_con_aes_gcm(mensaje: str, key: bytes):
+    # Generar un nonce aleatorio de 12 bytes
+    nonce = os.urandom(12)
+
+    # Convertir el mensaje a bytes
+    data = mensaje.encode()
+
+    # Crear el cifrador AES-GCM
+    cipher = Cipher(algorithms.AES(key), modes.GCM(nonce), backend=default_backend())
+    encryptor = cipher.encryptor()
+
+    # Cifrar el mensaje
+    ciphertext = encryptor.update(data) + encryptor.finalize()
+
+    # Obtener el tag de autenticación
+    tag = encryptor.tag
+
+    return ciphertext, nonce, tag
+
+@app.post("/generate_rsa_keys/")
+async def generate_keys():
+    try:
+        # Verificar si las llaves ya existen, en caso contrario generarlas
+        if not os.path.exists(private_key_path) or not os.path.exists(public_key_path):
+            private_key, public_key = generate_rsa_keys()
+        else:
+            return {"message": "Las llaves RSA ya están generadas y almacenadas."}
+
+        return {
+            "message": "Llaves RSA generadas y guardadas correctamente",
+            "private_key": private_key_path,
+            "public_key": public_key_path
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail="Error al generar las llaves RSA: " + str(e))
 
 @app.get("/usuarios/")
 async def get_usuarios(db: Session = Depends(get_db)):
@@ -519,73 +595,6 @@ async def verificar_firma(
 
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"Error al verificar la firma: {str(e)}")
-    
-def generate_x25519_keys():
-    
-    # Generar la clave privada
-    private_key = X25519PrivateKey.generate()
-
-    # Obtener la clave pública
-    public_key = private_key.public_key()
-
-    private_pem = private_key.private_bytes(
-        encoding=serialization.Encoding.PEM,
-        format=serialization.PrivateFormat.PKCS8,  
-        encryption_algorithm=serialization.NoEncryption()
-    )
-
-    public_pem = public_key.public_bytes(
-        encoding=serialization.Encoding.PEM,
-        format=serialization.PublicFormat.SubjectPublicKeyInfo
-    )
-
-    return private_key, public_pem.decode("utf-8")
-
-# Función para generar las llaves ED25519
-def generate_ed25519_keys():
-    private_key = ed25519.Ed25519PrivateKey.generate()
-    public_key = private_key.public_key()
-    
-    public_key_pem = public_key.public_bytes(
-        encoding=serialization.Encoding.PEM,
-        format=serialization.PublicFormat.SubjectPublicKeyInfo
-    ).decode('utf-8')
-    
-    return private_key, public_key_pem
-
-# Función para intercambiar las claves X25519
-def intercambiar_claves_x25519(private_key_pem, public_key_pem):
-    # Cargar las claves desde los archivos PEM
-    private_key = serialization.load_pem_private_key(private_key_pem, password=None, backend=default_backend())
-    public_key = serialization.load_pem_public_key(public_key_pem.encode('utf-8'), backend=default_backend())
-
-    # Realizar el intercambio de claves para obtener una clave compartida
-    shared_key = private_key.exchange(public_key)
-
-    # Usamos directamente la clave compartida como clave AES (32 bytes)
-    aes_key = shared_key[:32]
-
-    return aes_key
-
-# Función para cifrar el mensaje usando AES-GCM
-def cifrar_con_aes_gcm(mensaje: str, key: bytes):
-    # Generar un nonce aleatorio de 12 bytes
-    nonce = os.urandom(12)
-
-    # Convertir el mensaje a bytes
-    data = mensaje.encode()
-
-    # Crear el cifrador AES-GCM
-    cipher = Cipher(algorithms.AES(key), modes.GCM(nonce), backend=default_backend())
-    encryptor = cipher.encryptor()
-
-    # Cifrar el mensaje
-    ciphertext = encryptor.update(data) + encryptor.finalize()
-
-    # Obtener el tag de autenticación
-    tag = encryptor.tag
-
-    return ciphertext, nonce, tag
 
 def firmar_mensaje_con_ed25519(private_key, mensaje):
     # Firma del mensaje con la clave privada Ed25519
@@ -623,16 +632,13 @@ async def surtir_receta(
     if receta.fecha_vencimiento < datetime.utcnow():
         raise HTTPException(status_code=400, detail="La receta está vencida")
 
-    # --- Aquí está el candado: ---
-    if receta.farmaceutico_id != farmaceutico_id:
-        raise HTTPException(status_code=403, detail="No tienes permiso para surtir esta receta")
-
     # Verificar farmacéutico válido
     farmaceutico = db.query(Farmaceutico).filter(Farmaceutico.id == farmaceutico_id).first()
     if not farmaceutico:
         raise HTTPException(status_code=404, detail="Farmacéutico no encontrado")
     
     try:
+        # Usa la clave AES almacenada (hex string)
         aes_key = bytes.fromhex(receta.clave_aes)
         cipher = Cipher(
             algorithms.AES(aes_key),
@@ -646,6 +652,7 @@ async def surtir_receta(
 
     receta.estado = "surtida"
     receta.fecha_surtido = datetime.utcnow()
+    receta.farmaceutico_id = farmaceutico_id
     db.commit()
 
     return {
@@ -653,7 +660,6 @@ async def surtir_receta(
         "receta_id": receta.id,
         "contenido_receta": mensaje.decode("utf-8")
     }
-
 @app.get("/usuario_info/")
 async def usuario_info(username: str = Query(...), db: Session = Depends(get_db)):
     user = db.query(Usuario).filter(Usuario.username == username).first()
@@ -726,3 +732,4 @@ async def obtener_contenido_receta(
         "fecha_vencimiento": receta.fecha_vencimiento,
         "fecha_surtido": receta.fecha_surtido,
     }
+
