@@ -235,15 +235,16 @@ def generate_rsa_keys():
 
     return private_key, public_key
 
-# Función para cargar las llaves RSA (pública y privada)
 def load_rsa_keys():
-    with open(private_key_path, "rb") as private_key_file:
+    with open("private_key.pem", "rb") as private_key_file:
         private_key = serialization.load_pem_private_key(private_key_file.read(), password=None)
     
-    with open(public_key_path, "rb") as public_key_file:
+    with open("public_key.pem", "rb") as public_key_file:
         public_key = serialization.load_pem_public_key(public_key_file.read())
 
-    return private_key, public_key
+    # Asegurarse de que public_key es una clave pública RSA válida
+    if not isinstance(public_key, rsa.RSAPublicKey):
+        raise ValueError("La clave pública no es válida. Debe ser una clave pública RSA.")
 
 # Función para generar una clave AES-GCM de 256 bits
 def generate_aes_key():
