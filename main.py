@@ -473,15 +473,12 @@ async def verificar_firma(
         # Cargar la clave pública desde el formato PEM
         public_key = serialization.load_pem_public_key(public_key_pem.encode('utf-8'))
 
-        # Extraer la firma almacenada en la receta
-        firma = bytes.fromhex(receta.firma)  # Convertimos la firma de hex a bytes
+        
+        firma = receta.firma 
+        nonce = receta.nonce  
+        tag = receta.tag     
+        receta_cifrada = receta.receta_cifrada  
 
-        # Obtener la clave AES (clave compartida derivada del intercambio de claves X25519)
-        aes_key = bytes.fromhex(receta.clave_aes)
-
-        # Obtener el nonce y el tag (guardados en la base de datos)
-        nonce = bytes.fromhex(receta.nonce)
-        tag = bytes.fromhex(receta.tag)
 
         # descifrar el mensaje utilizando AES-GCM
         cipher = Cipher(algorithms.AES(aes_key), modes.GCM(nonce, tag), backend=default_backend())
@@ -608,7 +605,7 @@ async def surtir_receta(
     if receta.fecha_vencimiento < datetime.utcnow():
         raise HTTPException(status_code=400, detail="La receta está vencida")
 
-    # --- Aquí está el candado: ---
+    # --- Validar que el farmacéutico asignado sea el que intenta surtir ---
     if receta.farmaceutico_id != farmaceutico_id:
         raise HTTPException(status_code=403, detail="No tienes permiso para surtir esta receta")
 
@@ -618,14 +615,21 @@ async def surtir_receta(
         raise HTTPException(status_code=404, detail="Farmacéutico no encontrado")
     
     try:
-        aes_key = bytes.fromhex(receta.clave_aes)
+        # Si clave_aes sigue siendo string en la base, usa fromhex. 
+        # Pero si la tienes como LargeBinary, solo usa directo.
+        # aes_key = bytes.fromhex(receta.clave_aes)  # SOLO si es string
+        aes_key = receta.clave_aes  # LargeBinary
+        nonce = receta.nonce        # LargeBinary
+        tag = receta.tag            # LargeBinary
+        receta_cifrada = receta.receta_cifrada  # LargeBinary
+
         cipher = Cipher(
             algorithms.AES(aes_key),
-            modes.GCM(bytes.fromhex(receta.nonce), bytes.fromhex(receta.tag)),
+            modes.GCM(nonce, tag),
             backend=default_backend()
         )
         decryptor = cipher.decryptor()
-        mensaje = decryptor.update(bytes.fromhex(receta.receta_cifrada)) + decryptor.finalize()
+        mensaje = decryptor.update(receta_cifrada) + decryptor.finalize()
     except Exception as e:
         raise HTTPException(status_code=400, detail="Error al descifrar la receta: " + str(e))
 
@@ -638,6 +642,7 @@ async def surtir_receta(
         "receta_id": receta.id,
         "contenido_receta": mensaje.decode("utf-8")
     }
+
 
 @app.get("/usuario_info/")
 async def usuario_info(username: str = Query(...), db: Session = Depends(get_db)):
@@ -692,14 +697,19 @@ async def obtener_contenido_receta(
     if not receta:
         raise HTTPException(status_code=404, detail="Receta no encontrada")
     try:
-        aes_key = bytes.fromhex(receta.clave_aes)
+        # Si clave_aes es binario en la BD, úsalo directo.
+        aes_key = receta.clave_aes
+        nonce = receta.nonce
+        tag = receta.tag
+        receta_cifrada = receta.receta_cifrada
+
         cipher = Cipher(
             algorithms.AES(aes_key),
-            modes.GCM(bytes.fromhex(receta.nonce), bytes.fromhex(receta.tag)),
+            modes.GCM(nonce, tag),
             backend=default_backend(),
         )
         decryptor = cipher.decryptor()
-        mensaje = decryptor.update(bytes.fromhex(receta.receta_cifrada)) + decryptor.finalize()
+        mensaje = decryptor.update(receta_cifrada) + decryptor.finalize()
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"Error al descifrar el contenido: {e}")
 
@@ -711,4 +721,5 @@ async def obtener_contenido_receta(
         "fecha_vencimiento": receta.fecha_vencimiento,
         "fecha_surtido": receta.fecha_surtido,
     }
+
 
