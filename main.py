@@ -653,8 +653,13 @@ async def surtir_receta(
         raise HTTPException(status_code=404, detail="Farmacéutico no encontrado")
     
     try:
-        # Usa la clave AES almacenada (hex string)
-        aes_key = bytes.fromhex(receta.clave_aes)
+        # Cargar la clave privada RSA
+        private_key = load_private_key()
+
+        # Descifrar la clave AES (cifrada con RSA)
+        encrypted_aes_key = base64.b64decode(receta.clave_aes)
+        aes_key = decrypt_aes_key_with_rsa(encrypted_aes_key, private_key)
+        
         cipher = Cipher(
             algorithms.AES(aes_key),
             modes.GCM(bytes.fromhex(receta.nonce), bytes.fromhex(receta.tag)),
@@ -675,6 +680,7 @@ async def surtir_receta(
         "receta_id": receta.id,
         "contenido_receta": mensaje.decode("utf-8")
     }
+    
 @app.get("/usuario_info/")
 async def usuario_info(username: str = Query(...), db: Session = Depends(get_db)):
     user = db.query(Usuario).filter(Usuario.username == username).first()
