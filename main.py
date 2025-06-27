@@ -235,16 +235,15 @@ def generate_rsa_keys():
 
     return private_key, public_key
 
-def load_rsa_keys():
-    with open("private_key.pem", "rb") as private_key_file:
-        private_key = serialization.load_pem_private_key(private_key_file.read(), password=None)
-    
-    with open("public_key.pem", "rb") as public_key_file:
+def load_public_key():
+    with open(public_key_path, "rb") as public_key_file:
         public_key = serialization.load_pem_public_key(public_key_file.read())
+    return public_key
 
-    # Asegurarse de que public_key es una clave pública RSA válida
-    if not isinstance(public_key, rsa.RSAPublicKey):
-        raise ValueError("La clave pública no es válida. Debe ser una clave pública RSA.")
+def load_private_key():
+    with open(private_key_path, "rb") as private_key_file:
+        private_key = serialization.load_pem_private_key(private_key_file.read(), password=None)
+    return private_key
 
 # Función para generar una clave AES-GCM de 256 bits
 def generate_aes_key():
@@ -490,7 +489,7 @@ async def firmar_receta(
         if not paciente or not medico or not farmaceutico:
             raise HTTPException(status_code=404, detail="Usuario no encontrado")
         
-        public_key = load_rsa_keys()
+        public_key = load_public_key()
         
         aes_key = generate_aes_key()
 
@@ -713,7 +712,7 @@ async def obtener_contenido_receta(
         raise HTTPException(status_code=404, detail="Receta no encontrada")
     try:
         # Cargar la clave privada RSA
-        private_key = load_rsa_keys()
+        private_key = load_private_key()
 
         # Descifrar la clave AES (cifrada con RSA-OAEP) usando la clave privada
         encrypted_aes_key = base64.b64decode(receta.clave_aes)  # Clave AES cifrada en la base de datos
