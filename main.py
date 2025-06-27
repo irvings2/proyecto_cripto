@@ -261,6 +261,17 @@ def encrypt_aes_key_with_rsa(aes_key: bytes, public_key):
     )
     return base64.b64encode(ciphertext).decode('utf-8')
 
+def decrypt_aes_key_with_rsa(encrypted_aes_key: bytes, private_key):
+    aes_key = private_key.decrypt(
+        encrypted_aes_key,
+        padding.OAEP(
+            mgf=padding.MGF1(algorithm=hashes.SHA256()),
+            algorithm=hashes.SHA256(),
+            label=None
+        )
+    )
+    return aes_key
+
 # Función para cifrar el mensaje usando AES-GCM
 def cifrar_con_aes_gcm(mensaje: str, key: bytes):
     # Generar un nonce aleatorio de 12 bytes
@@ -565,8 +576,14 @@ async def verificar_firma(
         # Extraer la firma almacenada en la receta
         firma = bytes.fromhex(receta.firma)  # Convertimos la firma de hex a bytes
 
-        # Obtener la clave AES (clave compartida derivada del intercambio de claves X25519)
-        aes_key = bytes.fromhex(receta.clave_aes)
+        # Obtener la clave AES cifrada desde la base de datos (cifrada con RSA)
+        encrypted_aes_key = base64.b64decode(receta.clave_aes)
+
+        # Cargar la clave privada RSA para descifrar la clave AES
+        private_key = load_private_key()
+
+        # Descifrar la clave AES
+        aes_key = decrypt_aes_key_with_rsa(encrypted_aes_key, private_key)
 
         # Obtener el nonce y el tag (guardados en la base de datos)
         nonce = bytes.fromhex(receta.nonce)
@@ -716,14 +733,7 @@ async def obtener_contenido_receta(
 
         # Descifrar la clave AES (cifrada con RSA-OAEP) usando la clave privada
         encrypted_aes_key = base64.b64decode(receta.clave_aes)  # Clave AES cifrada en la base de datos
-        aes_key = private_key.decrypt(
-            encrypted_aes_key,
-            padding.OAEP(
-                mgf=padding.MGF1(algorithm=hashes.SHA256()),
-                algorithm=hashes.SHA256(),
-                label=None
-            )
-        )
+        aes_key = decrypt_aes_key_with_rsa(encrypted_aes_key, private_key)
         
         cipher = Cipher(
             algorithms.AES(aes_key),
