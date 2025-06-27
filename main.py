@@ -623,13 +623,16 @@ async def surtir_receta(
     if receta.fecha_vencimiento < datetime.utcnow():
         raise HTTPException(status_code=400, detail="La receta está vencida")
 
+    # --- Aquí está el candado: ---
+    if receta.farmaceutico_id != farmaceutico_id:
+        raise HTTPException(status_code=403, detail="No tienes permiso para surtir esta receta")
+
     # Verificar farmacéutico válido
     farmaceutico = db.query(Farmaceutico).filter(Farmaceutico.id == farmaceutico_id).first()
     if not farmaceutico:
         raise HTTPException(status_code=404, detail="Farmacéutico no encontrado")
     
     try:
-        # Usa la clave AES almacenada (hex string)
         aes_key = bytes.fromhex(receta.clave_aes)
         cipher = Cipher(
             algorithms.AES(aes_key),
@@ -643,7 +646,6 @@ async def surtir_receta(
 
     receta.estado = "surtida"
     receta.fecha_surtido = datetime.utcnow()
-    receta.farmaceutico_id = farmaceutico_id
     db.commit()
 
     return {
@@ -651,6 +653,7 @@ async def surtir_receta(
         "receta_id": receta.id,
         "contenido_receta": mensaje.decode("utf-8")
     }
+
 @app.get("/usuario_info/")
 async def usuario_info(username: str = Query(...), db: Session = Depends(get_db)):
     user = db.query(Usuario).filter(Usuario.username == username).first()
