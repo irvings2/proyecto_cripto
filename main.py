@@ -489,7 +489,7 @@ async def firmar_receta(
         if not paciente or not medico or not farmaceutico:
             raise HTTPException(status_code=404, detail="Usuario no encontrado")
         
-        private_key, public_key = load_rsa_keys()
+        public_key = load_rsa_keys()
         
         aes_key = generate_aes_key()
 
@@ -711,7 +711,20 @@ async def obtener_contenido_receta(
     if not receta:
         raise HTTPException(status_code=404, detail="Receta no encontrada")
     try:
-        aes_key = bytes.fromhex(receta.clave_aes)
+        # Cargar la clave privada RSA
+        private_key = load_rsa_keys()
+
+        # Descifrar la clave AES (cifrada con RSA-OAEP) usando la clave privada
+        encrypted_aes_key = base64.b64decode(receta.clave_aes)  # Clave AES cifrada en la base de datos
+        aes_key = private_key.decrypt(
+            encrypted_aes_key,
+            padding.OAEP(
+                mgf=padding.MGF1(algorithm=hashes.SHA256()),
+                algorithm=hashes.SHA256(),
+                label=None
+            )
+        )
+        
         cipher = Cipher(
             algorithms.AES(aes_key),
             modes.GCM(bytes.fromhex(receta.nonce), bytes.fromhex(receta.tag)),
